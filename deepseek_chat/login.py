@@ -116,10 +116,14 @@ def dump_page_state(page: Any) -> dict[str, Any]:
 
 def launch_browser(playwright: Any, browser_path: str | None, headless: bool) -> Any:
     if browser_path:
-        return playwright.firefox.launch(executable_path=str(Path(browser_path).expanduser()), headless=headless)
+        path = Path(browser_path).expanduser()
+        print(f"[login] browser={path}")
+        return playwright.firefox.launch(executable_path=str(path), headless=headless)
     camoufox = Path(DEFAULT_CAMOUFOX)
     if camoufox.exists():
+        print(f"[login] browser={camoufox}")
         return playwright.firefox.launch(executable_path=str(camoufox), headless=headless)
+    print("[login] browser=playwright chromium")
     return playwright.chromium.launch(headless=headless)
 
 

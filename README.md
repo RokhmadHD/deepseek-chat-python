@@ -51,7 +51,13 @@ Atau pakai login otomatis:
 deepseek-chat-login
 ```
 
-Command ini membuka browser, tunggu kamu login ke DeepSeek web, lalu menyimpan capture ke `captures/` dan otomatis sync token/cookie ke `.env`.
+Command ini membuka browser, tunggu kamu login ke DeepSeek web, lalu menyimpan capture ke `captures/` dan otomatis sync token/cookie ke `.env`. Secara default command ini memakai Camoufox di `/home/tensanq/.cache/camoufox/camoufox` kalau binary itu ada.
+
+Kalau mau paksa path Camoufox tertentu:
+
+```bash
+CAMOUFOX_BIN=/home/tensanq/.cache/camoufox/camoufox deepseek-chat-login
+```
 
 Kalau auto-detect login gagal, pakai mode manual:
 
@@ -119,7 +125,7 @@ Jika error saat download wasm, cek network lalu ulangi command. File wasm akan d
 
 Jika command `deepseek-chat` tidak ditemukan, pastikan virtualenv aktif dan `pip install -e .` sudah berhasil.
 
-Jika `deepseek-chat-login` gagal membuka browser, install browser Playwright dengan `python3 -m playwright install chromium`, atau set `CAMOUFOX_BIN=/path/to/camoufox`.
+Jika `deepseek-chat-login` gagal membuka browser, pastikan Camoufox masih ada di `/home/tensanq/.cache/camoufox/camoufox`, atau set `CAMOUFOX_BIN=/path/to/camoufox`. Fallback terakhir: install browser Playwright dengan `python3 -m playwright install chromium`.
 
 ## Status
 
