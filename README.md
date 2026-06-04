@@ -4,6 +4,12 @@ Client Python minimal untuk chat biasa ke DeepSeek web.
 
 Project ini sengaja dibuat kecil dulu: belum ada parser, belum ada OpenAI-compatible server, belum ada tool-calling. Fokusnya hanya bisa kirim prompt ke DeepSeek web dan print jawaban teks.
 
+## Support Development
+
+Jika Anda menemukan proyek ini berguna, pertimbangkan untuk mendukung pengembangannya:
+[![Saweria](https://img.shields.io/badge/Saweria-Support-orange?style=for-the-badge&logo=ko-fi&logoColor=white)](https://saweria.co/RokhmadHD)
+
+
 ## Fitur
 
 - Membuat chat session baru lewat `/api/v0/chat_session/create`.
