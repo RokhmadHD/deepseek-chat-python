@@ -14,6 +14,14 @@ from .logging_config import get_logger, setup_logging
 
 log = get_logger("tui")
 
+SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+ROLE_ICONS = {
+    "you": "●",
+    "deepseek": "◆",
+    "system": "•",
+    "error": "×",
+}
+
 
 class DeepSeekTui(App[None]):
     CSS = """
@@ -83,6 +91,10 @@ class DeepSeekTui(App[None]):
         self.session_id: str | None = None
         self.parent_message_id: str | int | None = None
         self.busy = False
+        self.loading = False
+        self.loading_frame = 0
+        self.loading_prefix = "DeepSeek is replying"
+        self.current_stream_role: Static | None = None
         self.current_stream_widget: Markdown | None = None
 
     def compose(self) -> ComposeResult:
@@ -123,7 +135,8 @@ class DeepSeekTui(App[None]):
 
         self.write_user(prompt)
         self.busy = True
-        self.update_status("DeepSeek is replying...")
+        self.create_assistant_stream()
+        self.start_loader("DeepSeek is replying")
         log.info("submitting prompt len=%s", len(prompt))
         self.send_prompt(prompt)
 
@@ -140,12 +153,12 @@ class DeepSeekTui(App[None]):
     def on_reply(self, text: str, session_id: str, parent_message_id: str | int | None) -> None:
         self.session_id = session_id
         self.parent_message_id = parent_message_id
-        self.current_stream_widget = self.create_assistant_stream()
         self.stream_reply(text)
 
     @work
     async def stream_reply(self, text: str) -> None:
         shown = ""
+        self.set_assistant_role_loading(False)
         for chunk in self.chunk_text(text):
             shown += chunk
             widget = self.current_stream_widget
@@ -154,10 +167,16 @@ class DeepSeekTui(App[None]):
                 self.scroll_chat_end()
             await asyncio.sleep(0.018)
         self.current_stream_widget = None
+        self.current_stream_role = None
         self.busy = False
+        self.stop_loader()
         self.update_status("Ready")
 
     def on_reply_error(self, exc: Exception) -> None:
+        self.stop_loader()
+        self.current_stream_widget = None
+        self.set_assistant_role_loading(False)
+        self.current_stream_role = None
         self.write_error(str(exc))
         self.write_system(f"Log: {self.log_file}")
         self.busy = False
@@ -170,13 +189,13 @@ class DeepSeekTui(App[None]):
     def write_user(self, text: str) -> None:
         self.add_message("you", text, "user-role")
 
-    def create_assistant_stream(self) -> Markdown:
+    def create_assistant_stream(self) -> None:
         chat = self.query_one("#chat", VerticalScroll)
-        chat.mount(Static("deepseek", classes="role assistant-role"))
-        widget = Markdown("", classes="bubble")
-        chat.mount(widget)
+        self.current_stream_role = Static(self.role_label("deepseek"), classes="role assistant-role")
+        self.current_stream_widget = Markdown("", classes="bubble")
+        chat.mount(self.current_stream_role)
+        chat.mount(self.current_stream_widget)
         self.scroll_chat_end()
-        return widget
 
     def write_system(self, text: str) -> None:
         self.add_message("system", text, "system-role")
@@ -186,9 +205,43 @@ class DeepSeekTui(App[None]):
 
     def add_message(self, role: str, text: str, role_class: str) -> None:
         chat = self.query_one("#chat", VerticalScroll)
-        chat.mount(Static(role, classes=f"role {role_class}"))
+        chat.mount(Static(self.role_label(role), classes=f"role {role_class}"))
         chat.mount(Markdown(text, classes="bubble"))
         self.scroll_chat_end()
+
+    def role_label(self, role: str) -> str:
+        icon = ROLE_ICONS.get(role, "•")
+        return f"{icon} {role}"
+
+    def start_loader(self, prefix: str) -> None:
+        self.loading = True
+        self.loading_prefix = prefix
+        self.loading_frame = 0
+        self.set_assistant_role_loading(True)
+        self.update_loader()
+        self.run_loader()
+
+    def stop_loader(self) -> None:
+        self.loading = False
+        self.set_assistant_role_loading(False)
+
+    @work
+    async def run_loader(self) -> None:
+        while self.loading:
+            self.update_loader()
+            await asyncio.sleep(0.09)
+
+    def update_loader(self) -> None:
+        frame = SPINNER_FRAMES[self.loading_frame % len(SPINNER_FRAMES)]
+        self.loading_frame += 1
+        self.query_one("#status", Static).update(self.status_text(f"{frame} {self.loading_prefix}"))
+        self.set_assistant_role_loading(True, frame)
+
+    def set_assistant_role_loading(self, loading: bool, frame: str | None = None) -> None:
+        if self.current_stream_role is None:
+            return
+        suffix = f" {frame}" if loading and frame else ""
+        self.current_stream_role.update(f"{self.role_label('deepseek')}{suffix}")
 
     def scroll_chat_end(self) -> None:
         self.query_one("#chat", VerticalScroll).scroll_end(animate=False)

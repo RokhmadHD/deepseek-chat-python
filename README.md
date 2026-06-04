@@ -99,6 +99,8 @@ TUI memakai Textual. Kontrol:
 
 Response TUI ditampilkan bertahap seperti streaming. Untuk saat ini HTTP request masih non-streaming, jadi teks mulai muncul setelah response lengkap diterima dari DeepSeek.
 
+Saat request berjalan, TUI menampilkan loader/spinner di status bar dan label assistant.
+
 ## Konfigurasi
 
 Env penting:
