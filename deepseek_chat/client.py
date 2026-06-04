@@ -10,6 +10,8 @@ from typing import Any
 
 import httpx
 
+from .session_store import DEFAULT_PROFILE, StoredSession, load_session
+
 
 def env_bool(name: str, fallback: bool) -> bool:
     raw = os.getenv(name)
@@ -18,25 +20,8 @@ def env_bool(name: str, fallback: bool) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
-def read_cookie_header() -> str:
-    if cookie := os.getenv("DEEPSEEK_COOKIE_HEADER"):
-        return cookie
-
-    cookie_file = os.getenv("DEEPSEEK_COOKIE_FILE")
-    if cookie_file and Path(cookie_file).exists():
-        return Path(cookie_file).read_text().strip()
-
-    parts: list[str] = []
-    cookie_envs = [
-        ("aws-waf-token", "DEEPSEEK_AWS_WAF_TOKEN"),
-        (".thumbcache_6b2e5483f9d858d7c661c5e276b6a6ae", "DEEPSEEK_THUMBCACHE"),
-        ("smidV2", "DEEPSEEK_SMIDV2"),
-        ("ds_session_id", "DEEPSEEK_DS_SESSION_ID"),
-    ]
-    for cookie_name, env_name in cookie_envs:
-        if value := os.getenv(env_name):
-            parts.append(f"{cookie_name}={value}")
-    return "; ".join(parts)
+def read_cookie_header(session: StoredSession | None = None) -> str:
+    return session.cookie_header if session else ""
 
 
 def likely_content_token(value: str) -> bool:
@@ -120,7 +105,9 @@ class ChatTurn:
 
 
 class DeepSeekClient:
-    def __init__(self) -> None:
+    def __init__(self, profile: str = DEFAULT_PROFILE) -> None:
+        self.profile = profile
+        self.stored_session = load_session(profile)
         self.api_base = os.getenv("DEEPSEEK_API_BASE", "https://chat.deepseek.com").rstrip("/")
         self.model_type = os.getenv("DEEPSEEK_MODEL_TYPE", "default")
         self.search_enabled = env_bool("DEEPSEEK_SEARCH_ENABLED", True)
@@ -153,13 +140,15 @@ class DeepSeekClient:
             "x-client-timezone-offset": os.getenv("DEEPSEEK_TZ_OFFSET", "25200"),
             "x-app-version": "2.0.0",
         }
-        if bearer := os.getenv("DEEPSEEK_BEARER"):
+        bearer = self.stored_session.bearer if self.stored_session else ""
+        if bearer:
             bearer = bearer.removeprefix("Bearer ").strip()
             headers["authz"] = f"Bearer {bearer}"
             headers["authorization"] = f"Bearer {bearer}"
-        if x_hif_leim := os.getenv("DEEPSEEK_X_HIF_LEIM"):
+        x_hif_leim = self.stored_session.x_hif_leim if self.stored_session else ""
+        if x_hif_leim:
             headers["x-hif-leim"] = x_hif_leim
-        if cookie := read_cookie_header():
+        if cookie := read_cookie_header(self.stored_session):
             headers["cookie"] = cookie
         if extra:
             headers.update(extra)

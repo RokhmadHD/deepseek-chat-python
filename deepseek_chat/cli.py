@@ -12,10 +12,11 @@ def main() -> None:
     load_dotenv()
 
     parser = argparse.ArgumentParser(description="Minimal DeepSeek web chat CLI")
+    parser.add_argument("--profile", default="default", help="SQLite auth profile. Defaults to default.")
     parser.add_argument("prompt", nargs="*", help="Prompt text. Omit for interactive mode.")
     args = parser.parse_args()
 
-    client = DeepSeekClient()
+    client = DeepSeekClient(profile=args.profile)
     session_id: str | None = None
     parent_message_id: str | None = None
 

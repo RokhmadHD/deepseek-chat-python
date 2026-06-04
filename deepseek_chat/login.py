@@ -11,7 +11,7 @@ from typing import Any
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
-from .env_sync import project_root, sync_env_from_capture
+from .session_store import DEFAULT_PROFILE, default_db_path, project_root, save_capture_to_db
 
 
 DEFAULT_URL = "https://chat.deepseek.com"
@@ -31,14 +31,15 @@ APP_READY_SELECTORS = [
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Login to DeepSeek web and sync .env automatically.")
+    parser = argparse.ArgumentParser(description="Login to DeepSeek web and save auth session to SQLite.")
     parser.add_argument("--url", default=DEFAULT_URL, help="DeepSeek start URL.")
     parser.add_argument("--output-dir", default=None, help="Capture output dir. Defaults to captures/deepseek-login-<timestamp>.")
     parser.add_argument("--browser-path", default=os.getenv("CAMOUFOX_BIN"), help="Browser executable path. Defaults to Camoufox if present.")
     parser.add_argument("--headless", action="store_true", help="Run browser headless.")
     parser.add_argument("--manual", action="store_true", help="Wait for Enter before saving instead of auto-detecting login.")
     parser.add_argument("--wait-timeout", type=int, default=180, help="Seconds to wait for login auto-detection.")
-    parser.add_argument("--no-sync", action="store_true", help="Save capture only; do not update .env.")
+    parser.add_argument("--profile", default=DEFAULT_PROFILE, help="SQLite auth profile to replace. Defaults to default.")
+    parser.add_argument("--no-db", action="store_true", help="Save capture only; do not update SQLite.")
     return parser.parse_args()
 
 
@@ -186,6 +187,6 @@ def main() -> None:
         browser.close()
 
     print(f"[login] saved capture to {output_dir}")
-    if not args.no_sync:
-        updates = sync_env_from_capture(output_dir)
-        print(f"[login] synced {len(updates)} values to {root / '.env'}")
+    if not args.no_db:
+        session = save_capture_to_db(output_dir, profile=args.profile)
+        print(f"[login] saved profile={session.profile} to {default_db_path()}")

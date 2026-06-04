@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import curses
+import argparse
 import textwrap
 from dataclasses import dataclass
 
@@ -16,9 +17,9 @@ class Message:
 
 
 class ChatTui:
-    def __init__(self, screen: curses.window) -> None:
+    def __init__(self, screen: curses.window, profile: str = "default") -> None:
         self.screen = screen
-        self.client = DeepSeekClient()
+        self.client = DeepSeekClient(profile=profile)
         self.messages: list[Message] = []
         self.input_text = ""
         self.session_id: str | None = None
@@ -143,8 +144,8 @@ class ChatTui:
         self.screen.move(y + 2, cursor_x)
 
 
-def _run(screen: curses.window) -> None:
-    app = ChatTui(screen)
+def _run(screen: curses.window, profile: str) -> None:
+    app = ChatTui(screen, profile=profile)
     try:
         app.run()
     finally:
@@ -153,4 +154,7 @@ def _run(screen: curses.window) -> None:
 
 def main() -> None:
     load_dotenv()
-    curses.wrapper(_run)
+    parser = argparse.ArgumentParser(description="DeepSeek web chat TUI")
+    parser.add_argument("--profile", default="default", help="SQLite auth profile. Defaults to default.")
+    args = parser.parse_args()
+    curses.wrapper(_run, args.profile)

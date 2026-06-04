@@ -17,7 +17,6 @@ Project ini sengaja dibuat kecil dulu: belum ada parser, belum ada OpenAI-compat
 
 - Python 3.11 atau lebih baru.
 - Session DeepSeek web yang masih valid.
-- Env auth dari browser/capture, biasanya `DEEPSEEK_BEARER` dan cookie.
 - Network access untuk install dependency dan download wasm PoW pertama kali.
 
 ## Setup
@@ -30,28 +29,15 @@ pip install -e .
 cp .env.example .env
 ```
 
-Lalu isi `.env`.
+`.env` hanya untuk config non-secret. Token dan cookie login disimpan ke SQLite.
 
-Minimal yang biasanya perlu:
-
-```env
-DEEPSEEK_BEARER=isi_token_bearer
-DEEPSEEK_COOKIE_HEADER=isi_cookie_header_lengkap
-```
-
-Kalau tidak mau taruh cookie panjang langsung di `.env`, pakai file:
-
-```env
-DEEPSEEK_COOKIE_FILE=/path/ke/cookie.txt
-```
-
-Atau pakai login otomatis:
+Login:
 
 ```bash
 deepseek-chat-login
 ```
 
-Command ini membuka browser, tunggu kamu login ke DeepSeek web, lalu menyimpan capture ke `captures/` dan otomatis sync token/cookie ke `.env`. Secara default command ini memakai Camoufox di `/home/tensanq/.cache/camoufox/camoufox` kalau binary itu ada.
+Command ini membuka browser, tunggu kamu login ke DeepSeek web, lalu menyimpan capture ke `captures/` dan auth ke `.data/session.db`. Kalau login ulang, profile yang sama akan di-replace. Secara default command ini memakai Camoufox di `/home/tensanq/.cache/camoufox/camoufox` kalau binary itu ada.
 
 Kalau mau paksa path Camoufox tertentu:
 
@@ -63,6 +49,14 @@ Kalau auto-detect login gagal, pakai mode manual:
 
 ```bash
 deepseek-chat-login --manual
+```
+
+Profile lain:
+
+```bash
+deepseek-chat-login --profile kerja
+deepseek-chat --profile kerja "hai bang"
+deepseek-chat-tui --profile kerja
 ```
 
 Kalau belum ada browser Playwright di mesin:
@@ -105,9 +99,6 @@ Env penting:
 
 | Env | Default | Keterangan |
 | --- | --- | --- |
-| `DEEPSEEK_BEARER` | kosong | Bearer token dari DeepSeek web. |
-| `DEEPSEEK_COOKIE_HEADER` | kosong | Cookie header lengkap dari browser. |
-| `DEEPSEEK_COOKIE_FILE` | kosong | File berisi cookie header. |
 | `DEEPSEEK_API_BASE` | `https://chat.deepseek.com` | Base URL DeepSeek web. |
 | `DEEPSEEK_MODEL_TYPE` | `default` | Model type yang dikirim ke DeepSeek. |
 | `DEEPSEEK_SEARCH_ENABLED` | `true` | Aktifkan search di request chat. |
@@ -115,11 +106,11 @@ Env penting:
 | `DEEPSEEK_PREEMPT` | `false` | Nilai `preempt` request. |
 | `DEEPSEEK_POW_WASM_CACHE` | `.cache/sha3_wasm_bg.7b9ca65ddd.wasm` | Lokasi cache wasm PoW. |
 
-Lihat [.env.example](./.env.example) untuk daftar lengkap.
+Auth login disimpan di `.data/session.db` dan tidak masuk git.
 
 ## Troubleshooting
 
-Jika dapat `401` atau `403`, auth/cookie kemungkinan sudah expired atau tidak lengkap. Ambil ulang session dari browser.
+Jika dapat `401` atau `403`, auth/cookie kemungkinan sudah expired atau tidak lengkap. Jalankan `deepseek-chat-login` lagi untuk replace session SQLite.
 
 Jika error saat download wasm, cek network lalu ulangi command. File wasm akan dicache di `.cache/`.
 
