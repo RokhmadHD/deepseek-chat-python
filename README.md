@@ -45,6 +45,26 @@ Kalau tidak mau taruh cookie panjang langsung di `.env`, pakai file:
 DEEPSEEK_COOKIE_FILE=/path/ke/cookie.txt
 ```
 
+Atau pakai login otomatis:
+
+```bash
+deepseek-chat-login
+```
+
+Command ini membuka browser, tunggu kamu login ke DeepSeek web, lalu menyimpan capture ke `captures/` dan otomatis sync token/cookie ke `.env`.
+
+Kalau auto-detect login gagal, pakai mode manual:
+
+```bash
+deepseek-chat-login --manual
+```
+
+Kalau belum ada browser Playwright di mesin:
+
+```bash
+python3 -m playwright install chromium
+```
+
 ## Cara Pakai
 
 Sekali jalan:
@@ -98,6 +118,8 @@ Jika dapat `401` atau `403`, auth/cookie kemungkinan sudah expired atau tidak le
 Jika error saat download wasm, cek network lalu ulangi command. File wasm akan dicache di `.cache/`.
 
 Jika command `deepseek-chat` tidak ditemukan, pastikan virtualenv aktif dan `pip install -e .` sudah berhasil.
+
+Jika `deepseek-chat-login` gagal membuka browser, install browser Playwright dengan `python3 -m playwright install chromium`, atau set `CAMOUFOX_BIN=/path/to/camoufox`.
 
 ## Status
 

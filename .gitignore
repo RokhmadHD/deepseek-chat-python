@@ -33,6 +33,7 @@ cookies.txt
 
 # DeepSeek local cache
 .cache/
+captures/
 tmp/
 
 # Editor and OS files
