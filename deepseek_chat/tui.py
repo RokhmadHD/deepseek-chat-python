@@ -55,7 +55,7 @@ class DeepSeekTui(App[None]):
         self.profile = profile
         self.client = DeepSeekClient(profile=profile)
         self.session_id: str | None = None
-        self.parent_message_id: str | None = None
+        self.parent_message_id: str | int | None = None
         self.busy = False
 
     def compose(self) -> ComposeResult:
@@ -110,7 +110,7 @@ class DeepSeekTui(App[None]):
             return
         self.call_from_thread(self.on_reply, turn.text or "(empty response)", turn.session_id, turn.parent_message_id)
 
-    def on_reply(self, text: str, session_id: str, parent_message_id: str | None) -> None:
+    def on_reply(self, text: str, session_id: str, parent_message_id: str | int | None) -> None:
         self.session_id = session_id
         self.parent_message_id = parent_message_id
         self.write_assistant(text)

@@ -21,7 +21,7 @@ def main() -> None:
 
     client = DeepSeekClient(profile=args.profile)
     session_id: str | None = None
-    parent_message_id: str | None = None
+    parent_message_id: str | int | None = None
 
     try:
         if args.prompt:

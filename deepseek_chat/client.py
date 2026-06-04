@@ -54,7 +54,7 @@ def extract_tokens(payload: str) -> list[str]:
     return []
 
 
-def extract_message_id(raw: str) -> str | None:
+def extract_message_id(raw: str) -> str | int | None:
     for line in raw.splitlines():
         if not line.startswith("data:"):
             continue
@@ -66,10 +66,10 @@ def extract_message_id(raw: str) -> str | None:
         except json.JSONDecodeError:
             continue
         if parsed.get("response_message_id") is not None:
-            return str(parsed["response_message_id"])
+            return parsed["response_message_id"]
         response = parsed.get("v", {}).get("response") if isinstance(parsed.get("v"), dict) else None
         if isinstance(response, dict) and response.get("message_id") is not None:
-            return str(response["message_id"])
+            return response["message_id"]
     return None
 
 
@@ -103,7 +103,7 @@ def render_sse_text(raw: str) -> str:
 class ChatTurn:
     text: str
     session_id: str
-    parent_message_id: str | None
+    parent_message_id: str | int | None
     raw: str
 
 
@@ -202,7 +202,7 @@ class DeepSeekClient:
         }
         return base64.b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
 
-    def chat(self, prompt: str, session_id: str | None = None, parent_message_id: str | None = None) -> ChatTurn:
+    def chat(self, prompt: str, session_id: str | None = None, parent_message_id: str | int | None = None) -> ChatTurn:
         log.info("chat request profile=%s session=%s parent=%s prompt_len=%s", self.profile, session_id, parent_message_id, len(prompt))
         session_id = session_id or self.create_session()
         challenge = self.get_pow_challenge()
@@ -223,6 +223,8 @@ class DeepSeekClient:
             },
         )
         log.info("completion status=%s response_bytes=%s", response.status_code, len(response.content))
+        if response.status_code >= 400:
+            log.error("completion error status=%s body=%s", response.status_code, response.text[:2000])
         response.raise_for_status()
         raw = response.text
         return ChatTurn(
