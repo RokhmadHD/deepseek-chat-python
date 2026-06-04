@@ -87,7 +87,7 @@ TUI terminal:
 deepseek-chat-tui
 ```
 
-Kontrol TUI:
+TUI memakai Textual. Kontrol:
 
 - `Enter` untuk kirim pesan.
 - `/model` untuk lihat model aktif.
@@ -95,7 +95,7 @@ Kontrol TUI:
 - `/model r1` atau `/model reasoner` untuk thinking/reasoner mode.
 - `/model <model_type>` untuk kirim `model_type` custom.
 - `/quit`, `/exit`, atau `/q` untuk keluar.
-- `PgUp` dan `PgDn` untuk scroll riwayat chat.
+- `Ctrl+L` untuk clear chat.
 
 ## Konfigurasi
 

@@ -1,113 +1,152 @@
 from __future__ import annotations
 
-import curses
 import argparse
-import textwrap
-from dataclasses import dataclass
 
 from dotenv import load_dotenv
+from textual import work
+from textual.app import App, ComposeResult
+from textual.containers import Horizontal
+from textual.widgets import Footer, Header, Input, Label, RichLog, Static
 
 from .client import DeepSeekClient
 
 
-@dataclass
-class Message:
-    role: str
-    text: str
+class DeepSeekTui(App[None]):
+    CSS = """
+    Screen {
+        layout: vertical;
+    }
 
+    #status {
+        height: 1;
+        padding: 0 1;
+        background: $panel;
+        color: $text;
+    }
 
-class ChatTui:
-    def __init__(self, screen: curses.window, profile: str = "default") -> None:
-        self.screen = screen
+    #chat {
+        height: 1fr;
+        border: solid $primary;
+        padding: 0 1;
+    }
+
+    #composer {
+        height: 3;
+        padding: 0 1;
+        background: $surface;
+    }
+
+    #prompt {
+        width: 1fr;
+    }
+    """
+
+    BINDINGS = [
+        ("ctrl+c", "quit", "Quit"),
+        ("ctrl+l", "clear_chat", "Clear"),
+    ]
+
+    def __init__(self, profile: str = "default") -> None:
+        super().__init__()
+        self.profile = profile
         self.client = DeepSeekClient(profile=profile)
-        self.messages: list[Message] = []
-        self.input_text = ""
         self.session_id: str | None = None
         self.parent_message_id: str | None = None
-        self.scroll = 0
-        self.status = self.default_status()
+        self.busy = False
 
-    def close(self) -> None:
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        yield Static(self.status_text(), id="status")
+        yield RichLog(id="chat", wrap=True, highlight=True, markup=True)
+        with Horizontal(id="composer"):
+            yield Label("> ")
+            yield Input(placeholder="Type message, /model, /model r1, /quit", id="prompt")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.title = "deepseek-chat-python"
+        self.sub_title = self.model_label()
+        self.query_one("#prompt", Input).focus()
+        self.write_system("Type a message and press Enter. Use /model to switch mode.")
+
+    def on_unmount(self) -> None:
         self.client.close()
 
-    def run(self) -> None:
-        curses.curs_set(1)
-        self.screen.keypad(True)
-        self.screen.timeout(-1)
-        self.draw()
-
-        while True:
-            key = self.screen.getch()
-            if key in (curses.KEY_RESIZE,):
-                self.draw()
-            elif key in (curses.KEY_PPAGE,):
-                self.scroll += 5
-                self.draw()
-            elif key in (curses.KEY_NPAGE,):
-                self.scroll = max(0, self.scroll - 5)
-                self.draw()
-            elif key in (curses.KEY_BACKSPACE, 127, 8):
-                self.input_text = self.input_text[:-1]
-                self.draw()
-            elif key in (10, 13):
-                if not self.submit():
-                    return
-            elif 0 <= key <= 255:
-                ch = chr(key)
-                if ch == "\x03":
-                    return
-                if ch.isprintable():
-                    self.input_text += ch
-                    self.draw()
-
-    def submit(self) -> bool:
-        prompt = self.input_text.strip()
-        self.input_text = ""
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        prompt = event.value.strip()
+        event.input.value = ""
         if not prompt:
-            self.draw()
-            return True
+            return
         if prompt in {"/q", "/quit", "/exit"}:
-            return False
+            self.exit()
+            return
         if prompt == "/model" or prompt.startswith("/model "):
             self.handle_model_command(prompt)
-            self.draw()
-            return True
+            return
+        if self.busy:
+            self.write_system("Request is still running. Wait for the current reply first.")
+            return
 
-        self.messages.append(Message("you", prompt))
-        self.status = f"DeepSeek is replying... | {self.model_label()}"
-        self.scroll = 0
-        self.draw()
+        self.write_user(prompt)
+        self.busy = True
+        self.update_status("DeepSeek is replying...")
+        self.send_prompt(prompt)
 
+    @work(thread=True)
+    def send_prompt(self, prompt: str) -> None:
         try:
             turn = self.client.chat(prompt, session_id=self.session_id, parent_message_id=self.parent_message_id)
-            self.session_id = turn.session_id
-            self.parent_message_id = turn.parent_message_id
-            self.messages.append(Message("deepseek", turn.text or "(empty response)"))
-            self.status = f"session: {self.session_id} | {self.model_label()} | /model"
         except Exception as exc:
-            self.messages.append(Message("error", str(exc)))
-            self.status = f"request failed | {self.model_label()} | /model"
+            self.call_from_thread(self.on_reply_error, exc)
+            return
+        self.call_from_thread(self.on_reply, turn.text or "(empty response)", turn.session_id, turn.parent_message_id)
 
-        self.draw()
-        return True
+    def on_reply(self, text: str, session_id: str, parent_message_id: str | None) -> None:
+        self.session_id = session_id
+        self.parent_message_id = parent_message_id
+        self.write_assistant(text)
+        self.busy = False
+        self.update_status("Ready")
 
-    def default_status(self) -> str:
-        return f"Enter: send | /model | /quit: exit | PgUp/PgDn: scroll | {self.model_label()}"
+    def on_reply_error(self, exc: Exception) -> None:
+        self.write_error(str(exc))
+        self.busy = False
+        self.update_status("Request failed")
+
+    def action_clear_chat(self) -> None:
+        self.query_one("#chat", RichLog).clear()
+        self.write_system("Chat cleared.")
+
+    def write_user(self, text: str) -> None:
+        self.query_one("#chat", RichLog).write(f"[bold cyan]you[/]: {text}")
+
+    def write_assistant(self, text: str) -> None:
+        self.query_one("#chat", RichLog).write(f"[bold green]deepseek[/]: {text}")
+
+    def write_system(self, text: str) -> None:
+        self.query_one("#chat", RichLog).write(f"[dim]system: {text}[/]")
+
+    def write_error(self, text: str) -> None:
+        self.query_one("#chat", RichLog).write(f"[bold red]error[/]: {text}")
 
     def model_label(self) -> str:
         mode = "reasoner" if self.client.thinking_enabled else "chat"
-        return f"model={self.client.model_type} mode={mode}"
+        return f"profile={self.profile} model={self.client.model_type} mode={mode}"
+
+    def status_text(self, prefix: str = "Ready") -> str:
+        return f"{prefix} | {self.model_label()} | /model chat | /model r1 | /quit"
+
+    def update_status(self, prefix: str) -> None:
+        self.sub_title = self.model_label()
+        self.query_one("#status", Static).update(self.status_text(prefix))
 
     def handle_model_command(self, command: str) -> None:
         parts = command.split(maxsplit=1)
         if len(parts) == 1:
-            self.messages.append(
-                Message(
-                    "system",
-                    f"{self.model_label()}. Use /model chat, /model r1, /model reasoner, or /model <model_type>.",
-                )
+            self.write_system(
+                f"{self.model_label()}. Use /model chat, /model r1, /model reasoner, or /model <model_type>."
             )
-            self.status = self.default_status()
+            self.update_status("Ready")
             return
 
         requested = parts[1].strip().lower()
@@ -124,77 +163,13 @@ class ChatTui:
             self.client.thinking_enabled = False
             label = self.client.model_type
 
-        self.messages.append(Message("system", f"Switched model to {label}. {self.model_label()}."))
-        self.status = self.default_status()
-
-    def draw(self) -> None:
-        self.screen.erase()
-        height, width = self.screen.getmaxyx()
-        if height < 8 or width < 30:
-            self.screen.addstr(0, 0, "Terminal too small")
-            self.screen.refresh()
-            return
-
-        chat_height = height - 4
-        self.draw_header(width)
-        self.draw_messages(1, chat_height, width)
-        self.draw_input(height - 3, width)
-        self.screen.refresh()
-
-    def draw_header(self, width: int) -> None:
-        title = f" deepseek-chat-python | {self.model_label()} "
-        self.screen.addstr(0, 0, title[:width], curses.A_REVERSE)
-        if len(title) < width:
-            self.screen.addstr(0, len(title), " " * (width - len(title)), curses.A_REVERSE)
-
-    def draw_messages(self, start_y: int, chat_height: int, width: int) -> None:
-        lines = self.render_message_lines(width)
-        visible = lines[max(0, len(lines) - chat_height - self.scroll) : len(lines) - self.scroll if self.scroll else len(lines)]
-        for idx, line in enumerate(visible[:chat_height]):
-            attr = curses.A_NORMAL
-            if line.startswith("you:"):
-                attr = curses.A_BOLD
-            elif line.startswith("error:"):
-                attr = curses.A_REVERSE
-            self.screen.addstr(start_y + idx, 0, line[: width - 1], attr)
-
-    def render_message_lines(self, width: int) -> list[str]:
-        if not self.messages:
-            return ["Type a message below. Use /quit to exit."]
-
-        lines: list[str] = []
-        wrap_width = max(20, width - 4)
-        for message in self.messages:
-            prefix = f"{message.role}: "
-            wrapped = textwrap.wrap(message.text, width=wrap_width, replace_whitespace=False) or [""]
-            lines.append((prefix + wrapped[0])[: width - 1])
-            indent = " " * len(prefix)
-            for line in wrapped[1:]:
-                lines.append((indent + line)[: width - 1])
-            lines.append("")
-        return lines
-
-    def draw_input(self, y: int, width: int) -> None:
-        separator = "-" * width
-        self.screen.addstr(y, 0, separator[:width])
-        self.screen.addstr(y + 1, 0, self.status[: width - 1])
-        prompt = "> " + self.input_text
-        self.screen.addstr(y + 2, 0, prompt[-(width - 1) :])
-        cursor_x = min(width - 1, len(prompt))
-        self.screen.move(y + 2, cursor_x)
-
-
-def _run(screen: curses.window, profile: str) -> None:
-    app = ChatTui(screen, profile=profile)
-    try:
-        app.run()
-    finally:
-        app.close()
+        self.write_system(f"Switched model to {label}. {self.model_label()}.")
+        self.update_status("Ready")
 
 
 def main() -> None:
     load_dotenv()
-    parser = argparse.ArgumentParser(description="DeepSeek web chat TUI")
+    parser = argparse.ArgumentParser(description="DeepSeek web chat Textual TUI")
     parser.add_argument("--profile", default="default", help="SQLite auth profile. Defaults to default.")
     args = parser.parse_args()
-    curses.wrapper(_run, args.profile)
+    DeepSeekTui(profile=args.profile).run()
