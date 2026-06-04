@@ -9,6 +9,9 @@ from textual.containers import Horizontal
 from textual.widgets import Footer, Header, Input, Label, RichLog, Static
 
 from .client import DeepSeekClient
+from .logging_config import get_logger, setup_logging
+
+log = get_logger("tui")
 
 
 class DeepSeekTui(App[None]):
@@ -48,6 +51,7 @@ class DeepSeekTui(App[None]):
 
     def __init__(self, profile: str = "default") -> None:
         super().__init__()
+        self.log_file = setup_logging()
         self.profile = profile
         self.client = DeepSeekClient(profile=profile)
         self.session_id: str | None = None
@@ -64,12 +68,14 @@ class DeepSeekTui(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        log.info("tui mounted profile=%s", self.profile)
         self.title = "deepseek-chat-python"
         self.sub_title = self.model_label()
         self.query_one("#prompt", Input).focus()
         self.write_system("Type a message and press Enter. Use /model to switch mode.")
 
     def on_unmount(self) -> None:
+        log.info("tui unmount")
         self.client.close()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -81,6 +87,7 @@ class DeepSeekTui(App[None]):
             self.exit()
             return
         if prompt == "/model" or prompt.startswith("/model "):
+            log.info("model command=%s", prompt)
             self.handle_model_command(prompt)
             return
         if self.busy:
@@ -90,6 +97,7 @@ class DeepSeekTui(App[None]):
         self.write_user(prompt)
         self.busy = True
         self.update_status("DeepSeek is replying...")
+        log.info("submitting prompt len=%s", len(prompt))
         self.send_prompt(prompt)
 
     @work(thread=True)
@@ -97,6 +105,7 @@ class DeepSeekTui(App[None]):
         try:
             turn = self.client.chat(prompt, session_id=self.session_id, parent_message_id=self.parent_message_id)
         except Exception as exc:
+            log.exception("send_prompt failed")
             self.call_from_thread(self.on_reply_error, exc)
             return
         self.call_from_thread(self.on_reply, turn.text or "(empty response)", turn.session_id, turn.parent_message_id)
@@ -110,6 +119,7 @@ class DeepSeekTui(App[None]):
 
     def on_reply_error(self, exc: Exception) -> None:
         self.write_error(str(exc))
+        self.write_system(f"Log: {self.log_file}")
         self.busy = False
         self.update_status("Request failed")
 
@@ -168,8 +178,18 @@ class DeepSeekTui(App[None]):
 
 
 def main() -> None:
+    log_file = setup_logging()
     load_dotenv()
     parser = argparse.ArgumentParser(description="DeepSeek web chat Textual TUI")
     parser.add_argument("--profile", default="default", help="SQLite auth profile. Defaults to default.")
     args = parser.parse_args()
-    DeepSeekTui(profile=args.profile).run()
+    try:
+        DeepSeekTui(profile=args.profile).run()
+    except Exception:
+        get_logger("tui").exception("tui crashed")
+        print(f"log: {log_file}")
+        raise
+
+
+if __name__ == "__main__":
+    main()

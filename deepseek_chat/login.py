@@ -11,7 +11,10 @@ from typing import Any
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
+from .logging_config import get_logger, setup_logging
 from .session_store import DEFAULT_PROFILE, default_db_path, project_root, save_capture_to_db
+
+log = get_logger("login")
 
 
 DEFAULT_URL = "https://chat.deepseek.com"
@@ -119,16 +122,20 @@ def launch_browser(playwright: Any, browser_path: str | None, headless: bool) ->
     if browser_path:
         path = Path(browser_path).expanduser()
         print(f"[login] browser={path}")
+        log.info("launching firefox browser=%s headless=%s", path, headless)
         return playwright.firefox.launch(executable_path=str(path), headless=headless)
     camoufox = Path(DEFAULT_CAMOUFOX)
     if camoufox.exists():
         print(f"[login] browser={camoufox}")
+        log.info("launching camoufox browser=%s headless=%s", camoufox, headless)
         return playwright.firefox.launch(executable_path=str(camoufox), headless=headless)
     print("[login] browser=playwright chromium")
+    log.info("launching playwright chromium headless=%s", headless)
     return playwright.chromium.launch(headless=headless)
 
 
 def main() -> None:
+    log_file = setup_logging()
     args = parse_args()
     root = project_root()
     output_dir = (
@@ -140,53 +147,64 @@ def main() -> None:
 
     print(f"[login] output_dir={output_dir}")
     print(f"[login] url={args.url}")
+    log.info("login start profile=%s output_dir=%s url=%s", args.profile, output_dir, args.url)
 
-    with sync_playwright() as playwright:
-        browser = launch_browser(playwright, args.browser_path, args.headless)
-        context = browser.new_context()
-        page = context.new_page()
-        page.goto(args.url, wait_until="domcontentloaded")
+    try:
+        with sync_playwright() as playwright:
+            browser = launch_browser(playwright, args.browser_path, args.headless)
+            context = browser.new_context()
+            page = context.new_page()
+            page.goto(args.url, wait_until="domcontentloaded")
 
-        if args.manual:
-            print("Login di browser, lalu kembali ke terminal dan tekan Enter.")
-            input("Press Enter when login is done...")
-        else:
-            print("Login di browser. Setelah session siap, capture akan auto-save.")
-            if not wait_for_login(context, args.wait_timeout):
-                browser.close()
-                raise SystemExit(f"Login tidak terdeteksi dalam {args.wait_timeout}s. Coba ulang dengan --manual.")
+            if args.manual:
+                print("Login di browser, lalu kembali ke terminal dan tekan Enter.")
+                input("Press Enter when login is done...")
+            else:
+                print("Login di browser. Setelah session siap, capture akan auto-save.")
+                if not wait_for_login(context, args.wait_timeout):
+                    browser.close()
+                    raise SystemExit(f"Login tidak terdeteksi dalam {args.wait_timeout}s. Coba ulang dengan --manual.")
 
-        try:
-            page.wait_for_load_state("networkidle", timeout=5000)
-        except PlaywrightTimeoutError:
-            pass
+            try:
+                page.wait_for_load_state("networkidle", timeout=5000)
+            except PlaywrightTimeoutError:
+                pass
 
-        storage_state_path = output_dir / "storage-state.json"
-        context.storage_state(path=str(storage_state_path))
-        (output_dir / "cookies.json").write_text(json.dumps(context.cookies(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        page_state = dump_page_state(page)
-        (output_dir / "page-storage.json").write_text(json.dumps(page_state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        pages = [dump_page_state(item) for item in context.pages if not item.is_closed()]
-        (output_dir / "pages.json").write_text(json.dumps(pages, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-        (output_dir / "manifest.json").write_text(
-            json.dumps(
-                {
-                    "captured_at": datetime.now().isoformat(),
-                    "url": args.url,
-                    "artifacts": {
-                        "storage_state": str(storage_state_path),
-                        "page_storage": str(output_dir / "page-storage.json"),
+            storage_state_path = output_dir / "storage-state.json"
+            context.storage_state(path=str(storage_state_path))
+            (output_dir / "cookies.json").write_text(json.dumps(context.cookies(), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            page_state = dump_page_state(page)
+            (output_dir / "page-storage.json").write_text(json.dumps(page_state, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            pages = [dump_page_state(item) for item in context.pages if not item.is_closed()]
+            (output_dir / "pages.json").write_text(json.dumps(pages, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            (output_dir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "captured_at": datetime.now().isoformat(),
+                        "url": args.url,
+                        "artifacts": {
+                            "storage_state": str(storage_state_path),
+                            "page_storage": str(output_dir / "page-storage.json"),
+                        },
                     },
-                },
-                indent=2,
-                ensure_ascii=False,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
             )
-            + "\n",
-            encoding="utf-8",
-        )
-        browser.close()
+            browser.close()
 
-    print(f"[login] saved capture to {output_dir}")
-    if not args.no_db:
-        session = save_capture_to_db(output_dir, profile=args.profile)
-        print(f"[login] saved profile={session.profile} to {default_db_path()}")
+        print(f"[login] saved capture to {output_dir}")
+        if not args.no_db:
+            session = save_capture_to_db(output_dir, profile=args.profile)
+            print(f"[login] saved profile={session.profile} to {default_db_path()}")
+            log.info("saved sqlite profile=%s db=%s", session.profile, default_db_path())
+    except Exception:
+        log.exception("login failed")
+        print(f"[login] log={log_file}")
+        raise
+
+
+if __name__ == "__main__":
+    main()

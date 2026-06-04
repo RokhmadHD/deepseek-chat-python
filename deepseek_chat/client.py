@@ -10,7 +10,10 @@ from typing import Any
 
 import httpx
 
+from .logging_config import get_logger
 from .session_store import DEFAULT_PROFILE, StoredSession, load_session
+
+log = get_logger("client")
 
 
 def env_bool(name: str, fallback: bool) -> bool:
@@ -108,6 +111,10 @@ class DeepSeekClient:
     def __init__(self, profile: str = DEFAULT_PROFILE) -> None:
         self.profile = profile
         self.stored_session = load_session(profile)
+        if self.stored_session:
+            log.info("loaded sqlite auth profile=%s captured_at=%s", profile, self.stored_session.captured_at)
+        else:
+            log.warning("no sqlite auth session found for profile=%s", profile)
         self.api_base = os.getenv("DEEPSEEK_API_BASE", "https://chat.deepseek.com").rstrip("/")
         self.model_type = os.getenv("DEEPSEEK_MODEL_TYPE", "default")
         self.search_enabled = env_bool("DEEPSEEK_SEARCH_ENABLED", True)
@@ -155,7 +162,9 @@ class DeepSeekClient:
         return headers
 
     def create_session(self) -> str:
+        log.info("creating chat session profile=%s", self.profile)
         response = self.client.post(f"{self.api_base}/api/v0/chat_session/create", headers=self.headers(), json={})
+        log.info("create_session status=%s", response.status_code)
         response.raise_for_status()
         data = response.json()
         session = data.get("data", {}).get("biz_data", {}).get("chat_session", {})
@@ -165,11 +174,13 @@ class DeepSeekClient:
         return str(session_id)
 
     def get_pow_challenge(self) -> dict[str, Any]:
+        log.info("requesting pow challenge target=%s", self.pow_target_path)
         response = self.client.post(
             f"{self.api_base}/api/v0/chat/create_pow_challenge",
             headers=self.headers(),
             json={"target_path": self.pow_target_path},
         )
+        log.info("pow challenge status=%s", response.status_code)
         response.raise_for_status()
         data = response.json()
         challenge = data.get("data", {}).get("biz_data", {}).get("challenge")
@@ -178,7 +189,9 @@ class DeepSeekClient:
         return challenge
 
     def solve_pow(self, challenge: dict[str, Any]) -> str:
+        log.info("solving pow algorithm=%s difficulty=%s", challenge.get("algorithm"), challenge.get("difficulty"))
         answer = solve_pow_with_wasm(challenge)
+        log.info("pow solved answer=%s", answer)
         payload = {
             "algorithm": challenge["algorithm"],
             "challenge": challenge["challenge"],
@@ -190,6 +203,7 @@ class DeepSeekClient:
         return base64.b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
 
     def chat(self, prompt: str, session_id: str | None = None, parent_message_id: str | None = None) -> ChatTurn:
+        log.info("chat request profile=%s session=%s parent=%s prompt_len=%s", self.profile, session_id, parent_message_id, len(prompt))
         session_id = session_id or self.create_session()
         challenge = self.get_pow_challenge()
         pow_response = self.solve_pow(challenge)
@@ -208,6 +222,7 @@ class DeepSeekClient:
                 "preempt": self.preempt,
             },
         )
+        log.info("completion status=%s response_bytes=%s", response.status_code, len(response.content))
         response.raise_for_status()
         raw = response.text
         return ChatTurn(

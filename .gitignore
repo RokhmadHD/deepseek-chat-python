@@ -35,6 +35,7 @@ cookies.txt
 .cache/
 captures/
 .data/
+.logs/
 tmp/
 
 # Editor and OS files

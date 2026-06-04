@@ -122,6 +122,8 @@ Jika command `deepseek-chat` tidak ditemukan, pastikan virtualenv aktif dan `pip
 
 Jika `deepseek-chat-login` gagal membuka browser, pastikan Camoufox masih ada di `/home/tensanq/.cache/camoufox/camoufox`, atau set `CAMOUFOX_BIN=/path/to/camoufox`. Fallback terakhir: install browser Playwright dengan `python3 -m playwright install chromium`.
 
+Log error ditulis ke `.logs/deepseek-chat.log`.
+
 ## Status
 
 Versi ini adalah port awal untuk chat biasa. Bagian parser dari project lama sengaja ditinggalkan dulu supaya fondasi client lebih sederhana dan mudah dites.
