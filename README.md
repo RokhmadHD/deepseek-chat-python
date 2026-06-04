@@ -7,6 +7,7 @@ Project ini sengaja dibuat kecil dulu: belum ada parser, belum ada OpenAI-compat
 ## Support Development
 
 Jika Anda menemukan proyek ini berguna, pertimbangkan untuk mendukung pengembangannya:
+
 [![Saweria](https://img.shields.io/badge/Saweria-Support-orange?style=for-the-badge&logo=ko-fi&logoColor=white)](https://saweria.co/RokhmadHD)
 
 
