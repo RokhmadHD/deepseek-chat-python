@@ -59,7 +59,8 @@ class DeepSeekTui(App[None]):
 
     .role {
         text-style: bold;
-        margin-top: 1;
+        margin-top: 0;
+        margin-bottom: 0;
     }
 
     .user-role {
@@ -79,7 +80,7 @@ class DeepSeekTui(App[None]):
     }
 
     .bubble {
-        margin-bottom: 1;
+        margin-bottom: 0;
     }
 
     .metrics {
@@ -182,7 +183,7 @@ class DeepSeekTui(App[None]):
             widget = self.current_stream_widget
             if widget is not None:
                 widget.update(shown)
-                self.scroll_chat_end()
+                self.schedule_scroll_end()
             await asyncio.sleep(0.018)
         self.current_stream_widget = None
         self.current_stream_role = None
@@ -214,7 +215,7 @@ class DeepSeekTui(App[None]):
         self.current_stream_widget = Markdown("", classes="bubble")
         chat.mount(self.current_stream_role)
         chat.mount(self.current_stream_widget)
-        self.scroll_chat_end()
+        self.schedule_scroll_end()
 
     def write_system(self, text: str) -> None:
         self.add_message("system", text, "system-role")
@@ -226,7 +227,7 @@ class DeepSeekTui(App[None]):
         chat = self.query_one("#chat", VerticalScroll)
         chat.mount(Static(self.role_label(role), classes=f"role {role_class}"))
         chat.mount(Markdown(text, classes="bubble"))
-        self.scroll_chat_end()
+        self.schedule_scroll_end()
 
     def write_metrics(self, text: str, elapsed: float) -> None:
         chat = self.query_one("#chat", VerticalScroll)
@@ -244,7 +245,7 @@ class DeepSeekTui(App[None]):
                 classes="metrics",
             )
         )
-        self.scroll_chat_end()
+        self.schedule_scroll_end()
 
     def estimate_tokens(self, text: str) -> int:
         compact_len = len(text.strip())
@@ -296,6 +297,9 @@ class DeepSeekTui(App[None]):
 
     def scroll_chat_end(self) -> None:
         self.query_one("#chat", VerticalScroll).scroll_end(animate=False)
+
+    def schedule_scroll_end(self) -> None:
+        self.call_after_refresh(self.scroll_chat_end)
 
     def chunk_text(self, text: str) -> list[str]:
         chunks: list[str] = []
