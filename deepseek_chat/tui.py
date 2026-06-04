@@ -25,7 +25,7 @@ class ChatTui:
         self.session_id: str | None = None
         self.parent_message_id: str | None = None
         self.scroll = 0
-        self.status = "Enter: send | /quit: exit | PgUp/PgDn: scroll"
+        self.status = self.default_status()
 
     def close(self) -> None:
         self.client.close()
@@ -68,9 +68,13 @@ class ChatTui:
             return True
         if prompt in {"/q", "/quit", "/exit"}:
             return False
+        if prompt == "/model" or prompt.startswith("/model "):
+            self.handle_model_command(prompt)
+            self.draw()
+            return True
 
         self.messages.append(Message("you", prompt))
-        self.status = "DeepSeek is replying..."
+        self.status = f"DeepSeek is replying... | {self.model_label()}"
         self.scroll = 0
         self.draw()
 
@@ -79,13 +83,49 @@ class ChatTui:
             self.session_id = turn.session_id
             self.parent_message_id = turn.parent_message_id
             self.messages.append(Message("deepseek", turn.text or "(empty response)"))
-            self.status = f"session: {self.session_id} | Enter: send | /quit: exit"
+            self.status = f"session: {self.session_id} | {self.model_label()} | /model"
         except Exception as exc:
             self.messages.append(Message("error", str(exc)))
-            self.status = "request failed | Enter: send | /quit: exit"
+            self.status = f"request failed | {self.model_label()} | /model"
 
         self.draw()
         return True
+
+    def default_status(self) -> str:
+        return f"Enter: send | /model | /quit: exit | PgUp/PgDn: scroll | {self.model_label()}"
+
+    def model_label(self) -> str:
+        mode = "reasoner" if self.client.thinking_enabled else "chat"
+        return f"model={self.client.model_type} mode={mode}"
+
+    def handle_model_command(self, command: str) -> None:
+        parts = command.split(maxsplit=1)
+        if len(parts) == 1:
+            self.messages.append(
+                Message(
+                    "system",
+                    f"{self.model_label()}. Use /model chat, /model r1, /model reasoner, or /model <model_type>.",
+                )
+            )
+            self.status = self.default_status()
+            return
+
+        requested = parts[1].strip().lower()
+        if requested in {"chat", "default", "v3"}:
+            self.client.model_type = "default"
+            self.client.thinking_enabled = False
+            label = "chat"
+        elif requested in {"r1", "reasoner", "reasoning", "think", "thinking"}:
+            self.client.model_type = "default"
+            self.client.thinking_enabled = True
+            label = "reasoner"
+        else:
+            self.client.model_type = parts[1].strip()
+            self.client.thinking_enabled = False
+            label = self.client.model_type
+
+        self.messages.append(Message("system", f"Switched model to {label}. {self.model_label()}."))
+        self.status = self.default_status()
 
     def draw(self) -> None:
         self.screen.erase()
@@ -102,7 +142,7 @@ class ChatTui:
         self.screen.refresh()
 
     def draw_header(self, width: int) -> None:
-        title = " deepseek-chat-python "
+        title = f" deepseek-chat-python | {self.model_label()} "
         self.screen.addstr(0, 0, title[:width], curses.A_REVERSE)
         if len(title) < width:
             self.screen.addstr(0, len(title), " " * (width - len(title)), curses.A_REVERSE)

@@ -90,6 +90,10 @@ deepseek-chat-tui
 Kontrol TUI:
 
 - `Enter` untuk kirim pesan.
+- `/model` untuk lihat model aktif.
+- `/model chat` untuk chat biasa.
+- `/model r1` atau `/model reasoner` untuk thinking/reasoner mode.
+- `/model <model_type>` untuk kirim `model_type` custom.
 - `/quit`, `/exit`, atau `/q` untuk keluar.
 - `PgUp` dan `PgDn` untuk scroll riwayat chat.
 
