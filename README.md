@@ -97,6 +97,8 @@ TUI memakai Textual. Kontrol:
 - `/quit`, `/exit`, atau `/q` untuk keluar.
 - `Ctrl+L` untuk clear chat.
 
+Response TUI ditampilkan bertahap seperti streaming. Untuk saat ini HTTP request masih non-streaming, jadi teks mulai muncul setelah response lengkap diterima dari DeepSeek.
+
 ## Konfigurasi
 
 Env penting:

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 
 from dotenv import load_dotenv
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal
-from textual.widgets import Footer, Header, Input, Label, RichLog, Static
+from textual.containers import Horizontal, VerticalScroll
+from textual.widgets import Footer, Header, Input, Label, Markdown, Static
 
 from .client import DeepSeekClient
 from .logging_config import get_logger, setup_logging
@@ -42,6 +43,31 @@ class DeepSeekTui(App[None]):
     #prompt {
         width: 1fr;
     }
+
+    .role {
+        text-style: bold;
+        margin-top: 1;
+    }
+
+    .user-role {
+        color: cyan;
+    }
+
+    .assistant-role {
+        color: green;
+    }
+
+    .system-role {
+        color: $text-muted;
+    }
+
+    .error-role {
+        color: red;
+    }
+
+    .bubble {
+        margin-bottom: 1;
+    }
     """
 
     BINDINGS = [
@@ -57,11 +83,12 @@ class DeepSeekTui(App[None]):
         self.session_id: str | None = None
         self.parent_message_id: str | int | None = None
         self.busy = False
+        self.current_stream_widget: Markdown | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static(self.status_text(), id="status")
-        yield RichLog(id="chat", wrap=True, highlight=True, markup=True)
+        yield VerticalScroll(id="chat")
         with Horizontal(id="composer"):
             yield Label("> ")
             yield Input(placeholder="Type message, /model, /model r1, /quit", id="prompt")
@@ -113,7 +140,20 @@ class DeepSeekTui(App[None]):
     def on_reply(self, text: str, session_id: str, parent_message_id: str | int | None) -> None:
         self.session_id = session_id
         self.parent_message_id = parent_message_id
-        self.write_assistant(text)
+        self.current_stream_widget = self.create_assistant_stream()
+        self.stream_reply(text)
+
+    @work
+    async def stream_reply(self, text: str) -> None:
+        shown = ""
+        for chunk in self.chunk_text(text):
+            shown += chunk
+            widget = self.current_stream_widget
+            if widget is not None:
+                widget.update(shown)
+                self.scroll_chat_end()
+            await asyncio.sleep(0.018)
+        self.current_stream_widget = None
         self.busy = False
         self.update_status("Ready")
 
@@ -124,20 +164,49 @@ class DeepSeekTui(App[None]):
         self.update_status("Request failed")
 
     def action_clear_chat(self) -> None:
-        self.query_one("#chat", RichLog).clear()
+        self.query_one("#chat", VerticalScroll).remove_children()
         self.write_system("Chat cleared.")
 
     def write_user(self, text: str) -> None:
-        self.query_one("#chat", RichLog).write(f"[bold cyan]you[/]: {text}")
+        self.add_message("you", text, "user-role")
 
-    def write_assistant(self, text: str) -> None:
-        self.query_one("#chat", RichLog).write(f"[bold green]deepseek[/]: {text}")
+    def create_assistant_stream(self) -> Markdown:
+        chat = self.query_one("#chat", VerticalScroll)
+        chat.mount(Static("deepseek", classes="role assistant-role"))
+        widget = Markdown("", classes="bubble")
+        chat.mount(widget)
+        self.scroll_chat_end()
+        return widget
 
     def write_system(self, text: str) -> None:
-        self.query_one("#chat", RichLog).write(f"[dim]system: {text}[/]")
+        self.add_message("system", text, "system-role")
 
     def write_error(self, text: str) -> None:
-        self.query_one("#chat", RichLog).write(f"[bold red]error[/]: {text}")
+        self.add_message("error", text, "error-role")
+
+    def add_message(self, role: str, text: str, role_class: str) -> None:
+        chat = self.query_one("#chat", VerticalScroll)
+        chat.mount(Static(role, classes=f"role {role_class}"))
+        chat.mount(Markdown(text, classes="bubble"))
+        self.scroll_chat_end()
+
+    def scroll_chat_end(self) -> None:
+        self.query_one("#chat", VerticalScroll).scroll_end(animate=False)
+
+    def chunk_text(self, text: str) -> list[str]:
+        chunks: list[str] = []
+        current = ""
+        for part in text.split(" "):
+            piece = part if not current else f" {part}"
+            if len(current) + len(piece) > 18:
+                if current:
+                    chunks.append(current)
+                current = piece.lstrip()
+            else:
+                current += piece
+        if current:
+            chunks.append(current)
+        return chunks or [text]
 
     def model_label(self) -> str:
         mode = "reasoner" if self.client.thinking_enabled else "chat"
