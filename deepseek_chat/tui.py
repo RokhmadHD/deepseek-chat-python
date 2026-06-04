@@ -25,6 +25,7 @@ ROLE_ICONS = {
     "system": "•",
     "error": "×",
 }
+MODEL_TYPES = ["default", "expert"]
 
 
 class DeepSeekTui(App[None]):
@@ -112,7 +113,7 @@ class DeepSeekTui(App[None]):
         yield VerticalScroll(id="chat")
         with Horizontal(id="composer"):
             yield Label("> ")
-            yield Input(placeholder="Type message, /model, /model r1, /quit", id="prompt")
+            yield Input(placeholder="Type message, /model, /model expert, /quit", id="prompt")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -120,7 +121,7 @@ class DeepSeekTui(App[None]):
         self.title = "deepseek-chat-python"
         self.sub_title = self.model_label()
         self.query_one("#prompt", Input).focus()
-        self.write_system("Type a message and press Enter. Use /model to switch mode.")
+        self.write_system("Type a message and press Enter. Use /model to switch model_type.")
 
     def on_unmount(self) -> None:
         log.info("tui unmount")
@@ -305,11 +306,11 @@ class DeepSeekTui(App[None]):
         return chunks or [text]
 
     def model_label(self) -> str:
-        mode = "reasoner" if self.client.thinking_enabled else "chat"
-        return f"profile={self.profile} model={self.client.model_type} mode={mode}"
+        thinking = "on" if self.client.thinking_enabled else "off"
+        return f"profile={self.profile} model_type={self.client.model_type} thinking={thinking}"
 
     def status_text(self, prefix: str = "Ready") -> str:
-        return f"{prefix} | {self.model_label()} | /model chat | /model r1 | /quit"
+        return f"{prefix} | {self.model_label()} | /model default | /model expert | /quit"
 
     def update_status(self, prefix: str) -> None:
         self.sub_title = self.model_label()
@@ -318,27 +319,23 @@ class DeepSeekTui(App[None]):
     def handle_model_command(self, command: str) -> None:
         parts = command.split(maxsplit=1)
         if len(parts) == 1:
-            self.write_system(
-                f"{self.model_label()}. Use /model chat, /model r1, /model reasoner, or /model <model_type>."
-            )
+            current = self.client.model_type if self.client.model_type in MODEL_TYPES else "default"
+            current_index = MODEL_TYPES.index(current)
+            self.client.model_type = MODEL_TYPES[(current_index + 1) % len(MODEL_TYPES)]
+            self.write_system(f"Switched model_type to {self.client.model_type}. {self.model_label()}.")
             self.update_status("Ready")
             return
 
         requested = parts[1].strip().lower()
-        if requested in {"chat", "default", "v3"}:
-            self.client.model_type = "default"
-            self.client.thinking_enabled = False
-            label = "chat"
-        elif requested in {"r1", "reasoner", "reasoning", "think", "thinking"}:
-            self.client.model_type = "default"
-            self.client.thinking_enabled = True
-            label = "reasoner"
+        if requested in MODEL_TYPES:
+            self.client.model_type = requested
+            label = requested
         else:
-            self.client.model_type = parts[1].strip()
-            self.client.thinking_enabled = False
-            label = self.client.model_type
+            self.write_system("Unknown model_type. Use /model default or /model expert.")
+            self.update_status("Ready")
+            return
 
-        self.write_system(f"Switched model to {label}. {self.model_label()}.")
+        self.write_system(f"Switched model_type to {label}. {self.model_label()}.")
         self.update_status("Ready")
 
 
