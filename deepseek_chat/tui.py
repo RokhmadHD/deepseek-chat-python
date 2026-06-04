@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
+import time
 
 from dotenv import load_dotenv
 from textual import work
@@ -15,6 +17,8 @@ from .logging_config import get_logger, setup_logging
 log = get_logger("tui")
 
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+ESTIMATED_CHARS_PER_TOKEN = 4
+DEFAULT_OUTPUT_COST_PER_1M_TOKENS_USD = 1.10
 ROLE_ICONS = {
     "you": "●",
     "deepseek": "◆",
@@ -74,6 +78,11 @@ class DeepSeekTui(App[None]):
     }
 
     .bubble {
+        margin-bottom: 1;
+    }
+
+    .metrics {
+        color: $text-muted;
         margin-bottom: 1;
     }
     """
@@ -142,21 +151,29 @@ class DeepSeekTui(App[None]):
 
     @work(thread=True)
     def send_prompt(self, prompt: str) -> None:
+        started_at = time.perf_counter()
         try:
             turn = self.client.chat(prompt, session_id=self.session_id, parent_message_id=self.parent_message_id)
         except Exception as exc:
             log.exception("send_prompt failed")
             self.call_from_thread(self.on_reply_error, exc)
             return
-        self.call_from_thread(self.on_reply, turn.text or "(empty response)", turn.session_id, turn.parent_message_id)
+        elapsed = time.perf_counter() - started_at
+        self.call_from_thread(
+            self.on_reply,
+            turn.text or "(empty response)",
+            turn.session_id,
+            turn.parent_message_id,
+            elapsed,
+        )
 
-    def on_reply(self, text: str, session_id: str, parent_message_id: str | int | None) -> None:
+    def on_reply(self, text: str, session_id: str, parent_message_id: str | int | None, elapsed: float) -> None:
         self.session_id = session_id
         self.parent_message_id = parent_message_id
-        self.stream_reply(text)
+        self.stream_reply(text, elapsed)
 
     @work
-    async def stream_reply(self, text: str) -> None:
+    async def stream_reply(self, text: str, elapsed: float) -> None:
         shown = ""
         self.set_assistant_role_loading(False)
         for chunk in self.chunk_text(text):
@@ -168,6 +185,7 @@ class DeepSeekTui(App[None]):
             await asyncio.sleep(0.018)
         self.current_stream_widget = None
         self.current_stream_role = None
+        self.write_metrics(text, elapsed)
         self.busy = False
         self.stop_loader()
         self.update_status("Ready")
@@ -208,6 +226,38 @@ class DeepSeekTui(App[None]):
         chat.mount(Static(self.role_label(role), classes=f"role {role_class}"))
         chat.mount(Markdown(text, classes="bubble"))
         self.scroll_chat_end()
+
+    def write_metrics(self, text: str, elapsed: float) -> None:
+        chat = self.query_one("#chat", VerticalScroll)
+        token_count = self.estimate_tokens(text)
+        tokens_per_second = token_count / elapsed if elapsed > 0 else 0.0
+        cost = self.estimate_cost(token_count)
+        chat.mount(
+            Static(
+                (
+                    f"      time {elapsed:>6.2f}s"
+                    f"   tokens {token_count:>5}"
+                    f"   tok/s {tokens_per_second:>6.1f}"
+                    f"   cost ${cost:>8.6f}"
+                ),
+                classes="metrics",
+            )
+        )
+        self.scroll_chat_end()
+
+    def estimate_tokens(self, text: str) -> int:
+        compact_len = len(text.strip())
+        if compact_len == 0:
+            return 0
+        return max(1, round(compact_len / ESTIMATED_CHARS_PER_TOKEN))
+
+    def estimate_cost(self, output_tokens: int) -> float:
+        raw_rate = os.getenv("DEEPSEEK_ESTIMATED_OUTPUT_COST_PER_1M_TOKENS_USD")
+        try:
+            rate = float(raw_rate) if raw_rate is not None else DEFAULT_OUTPUT_COST_PER_1M_TOKENS_USD
+        except ValueError:
+            rate = DEFAULT_OUTPUT_COST_PER_1M_TOKENS_USD
+        return output_tokens / 1_000_000 * rate
 
     def role_label(self, role: str) -> str:
         icon = ROLE_ICONS.get(role, "•")

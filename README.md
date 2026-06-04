@@ -101,6 +101,8 @@ Response TUI ditampilkan bertahap seperti streaming. Untuk saat ini HTTP request
 
 Saat request berjalan, TUI menampilkan loader/spinner di status bar dan label assistant.
 
+Di bawah response AI, TUI menampilkan metrik kiri-ke-kanan: durasi, estimasi token output, token/s, dan estimasi cost. Estimasi cost memakai `DEEPSEEK_ESTIMATED_OUTPUT_COST_PER_1M_TOKENS_USD`.
+
 ## Konfigurasi
 
 Env penting:
