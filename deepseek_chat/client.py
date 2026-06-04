@@ -34,13 +34,13 @@ def likely_content_token(value: str) -> bool:
 
 
 def extract_tokens(payload: str) -> list[str]:
-    text = payload.strip()
+    text = payload
     if not text:
         return []
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        return [text] if likely_content_token(text) else []
+        return [text] if likely_content_token(text.strip()) else []
 
     response = parsed.get("v", {}).get("response") if isinstance(parsed.get("v"), dict) else None
     fragments = response.get("fragments") if isinstance(response, dict) else None
@@ -58,7 +58,7 @@ def extract_message_id(raw: str) -> str | int | None:
     for line in raw.splitlines():
         if not line.startswith("data:"):
             continue
-        payload = line[5:].strip()
+        payload = line[5:].removeprefix(" ")
         if not payload or payload == "[DONE]":
             continue
         try:
@@ -94,7 +94,7 @@ def render_sse_text(raw: str) -> str:
         elif line.startswith("event:"):
             event_name = line[6:].strip()
         elif line.startswith("data:"):
-            data_lines.append(line[5:].lstrip())
+            data_lines.append(line[5:].removeprefix(" "))
     flush()
     return "".join(out)
 

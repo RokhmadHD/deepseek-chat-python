@@ -195,17 +195,10 @@ class DeepSeekTui(App[None]):
 
     def chunk_text(self, text: str) -> list[str]:
         chunks: list[str] = []
-        current = ""
-        for part in text.split(" "):
-            piece = part if not current else f" {part}"
-            if len(current) + len(piece) > 18:
-                if current:
-                    chunks.append(current)
-                current = piece.lstrip()
-            else:
-                current += piece
-        if current:
-            chunks.append(current)
+        index = 0
+        while index < len(text):
+            chunks.append(text[index : index + 12])
+            index += 12
         return chunks or [text]
 
     def model_label(self) -> str:
