@@ -265,14 +265,15 @@ def solve_pow_with_wasm(challenge: dict[str, Any]) -> int:
         return ptr, len(encoded)
 
     salt = f"{challenge['salt']}_{challenge['expire_at']}_"
+    difficulty = float(challenge["difficulty"])
     ret_ptr = stack(store, -16)
     challenge_ptr, challenge_len = write_string(str(challenge["challenge"]))
     salt_ptr, salt_len = write_string(salt)
     try:
         if solver_style == "wasm_solve":
-            solver(store, ret_ptr, challenge_ptr, challenge_len, salt_ptr, salt_len, int(challenge["difficulty"]))
+            solver(store, ret_ptr, challenge_ptr, challenge_len, salt_ptr, salt_len, difficulty)
         else:
-            solver(store, challenge_ptr, challenge_len, salt_ptr, salt_len, int(challenge["difficulty"]), ret_ptr)
+            solver(store, challenge_ptr, challenge_len, salt_ptr, salt_len, difficulty, ret_ptr)
         raw = memory.read(store, ret_ptr, ret_ptr + 16)
     finally:
         stack(store, 16)
