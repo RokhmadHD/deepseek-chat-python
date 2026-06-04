@@ -61,6 +61,18 @@ deepseek-chat
 
 Di mode interaktif, session dan `parent_message_id` dipertahankan selama proses masih hidup, jadi percakapan lanjut dalam thread yang sama.
 
+TUI terminal:
+
+```bash
+deepseek-chat-tui
+```
+
+Kontrol TUI:
+
+- `Enter` untuk kirim pesan.
+- `/quit`, `/exit`, atau `/q` untuk keluar.
+- `PgUp` dan `PgDn` untuk scroll riwayat chat.
+
 ## Konfigurasi
 
 Env penting:

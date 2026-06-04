@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 deepseek-chat = "deepseek_chat.cli:main"
+deepseek-chat-tui = "deepseek_chat.tui:main"
 
 [build-system]
 requires = ["setuptools>=69.0"]
