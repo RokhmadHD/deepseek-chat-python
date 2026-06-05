@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,20 @@ class StoredSession:
     ds_session_id: str
     x_hif_leim: str
     captured_at: str
+
+
+@dataclass(frozen=True)
+class ChatSessionRecord:
+    profile: str
+    chat_session_id: str
+    parent_message_id: str | int | None
+    title: str
+    preview: str
+    turn_count: int
+    created_at: str
+    updated_at: str
+    messages: list[dict[str, str]] = field(default_factory=list)
+    stats: dict[str, float | int] = field(default_factory=dict)
 
 
 def project_root() -> Path:
@@ -72,6 +86,36 @@ def connect(db_path: Path | None = None) -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            profile TEXT NOT NULL,
+            chat_session_id TEXT NOT NULL,
+            parent_message_id_json TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            preview TEXT NOT NULL DEFAULT '',
+            turn_count INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            stats_json TEXT NOT NULL DEFAULT '{}',
+            PRIMARY KEY (profile, chat_session_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_chat_sessions_profile_updated_at
+        ON chat_sessions(profile, updated_at DESC)
+        """
+    )
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(chat_sessions)").fetchall()
+    }
+    if "messages_json" not in columns:
+        conn.execute("ALTER TABLE chat_sessions ADD COLUMN messages_json TEXT NOT NULL DEFAULT '[]'")
+    if "stats_json" not in columns:
+        conn.execute("ALTER TABLE chat_sessions ADD COLUMN stats_json TEXT NOT NULL DEFAULT '{}'")
     return conn
 
 
@@ -207,3 +251,198 @@ def load_session(profile: str = DEFAULT_PROFILE, db_path: Path | None = None) ->
     if not row:
         return None
     return StoredSession(*[str(item or "") for item in row])
+
+
+def _dump_parent_message_id(parent_message_id: str | int | None) -> str:
+    return json.dumps(parent_message_id)
+
+
+def _load_parent_message_id(raw: str) -> str | int | None:
+    return json.loads(raw) if raw else None
+
+
+def _load_messages(raw: str) -> list[dict[str, str]]:
+    if not raw:
+        return []
+    parsed = json.loads(raw)
+    if not isinstance(parsed, list):
+        return []
+    messages: list[dict[str, str]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role", "")).strip()
+        text = str(item.get("text", ""))
+        if role in {"user", "assistant"} and text:
+            messages.append({"role": role, "text": text})
+    return messages
+
+
+def _dump_messages(messages: list[dict[str, str]] | None) -> str:
+    if not messages:
+        return "[]"
+    normalized = [
+        {"role": str(item.get("role", "")), "text": str(item.get("text", ""))}
+        for item in messages
+        if str(item.get("role", "")) in {"user", "assistant"} and str(item.get("text", ""))
+    ]
+    return json.dumps(normalized, ensure_ascii=False)
+
+
+def _load_stats(raw: str) -> dict[str, float | int]:
+    if not raw:
+        return {}
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        return {}
+    stats: dict[str, float | int] = {}
+    for key, value in parsed.items():
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            stats[str(key)] = value
+    return stats
+
+
+def _dump_stats(stats: dict[str, float | int] | None) -> str:
+    if not stats:
+        return "{}"
+    normalized: dict[str, float | int] = {}
+    for key, value in stats.items():
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            normalized[str(key)] = value
+    return json.dumps(normalized, ensure_ascii=False)
+
+
+def list_chat_sessions(profile: str = DEFAULT_PROFILE, db_path: Path | None = None) -> list[ChatSessionRecord]:
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                profile,
+                chat_session_id,
+                parent_message_id_json,
+                title,
+                preview,
+                turn_count,
+                created_at,
+                updated_at,
+                messages_json,
+                stats_json
+            FROM chat_sessions
+            WHERE profile = ?
+            ORDER BY updated_at DESC, chat_session_id DESC
+            """,
+            (profile,),
+        ).fetchall()
+    return [
+        ChatSessionRecord(
+            profile=str(row[0]),
+            chat_session_id=str(row[1]),
+            parent_message_id=_load_parent_message_id(str(row[2] or "")),
+            title=str(row[3] or ""),
+            preview=str(row[4] or ""),
+            turn_count=int(row[5] or 0),
+            created_at=str(row[6] or ""),
+            updated_at=str(row[7] or ""),
+            messages=_load_messages(str(row[8] or "")),
+            stats=_load_stats(str(row[9] or "")),
+        )
+        for row in rows
+    ]
+
+
+def load_chat_session(
+    chat_session_id: str,
+    profile: str = DEFAULT_PROFILE,
+    db_path: Path | None = None,
+) -> ChatSessionRecord | None:
+    with connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT
+                profile,
+                chat_session_id,
+                parent_message_id_json,
+                title,
+                preview,
+                turn_count,
+                created_at,
+                updated_at,
+                messages_json,
+                stats_json
+            FROM chat_sessions
+            WHERE profile = ? AND chat_session_id = ?
+            """,
+            (profile, chat_session_id),
+        ).fetchone()
+    if not row:
+        return None
+    return ChatSessionRecord(
+        profile=str(row[0]),
+        chat_session_id=str(row[1]),
+        parent_message_id=_load_parent_message_id(str(row[2] or "")),
+        title=str(row[3] or ""),
+        preview=str(row[4] or ""),
+        turn_count=int(row[5] or 0),
+        created_at=str(row[6] or ""),
+        updated_at=str(row[7] or ""),
+        messages=_load_messages(str(row[8] or "")),
+        stats=_load_stats(str(row[9] or "")),
+    )
+
+
+def save_chat_session(
+    profile: str,
+    chat_session_id: str,
+    parent_message_id: str | int | None,
+    title: str,
+    preview: str,
+    turn_count: int,
+    created_at: str,
+    updated_at: str,
+    messages: list[dict[str, str]] | None = None,
+    stats: dict[str, float | int] | None = None,
+    db_path: Path | None = None,
+) -> None:
+    with connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO chat_sessions (
+                profile,
+                chat_session_id,
+                parent_message_id_json,
+                title,
+                preview,
+                turn_count,
+                created_at,
+                updated_at,
+                messages_json,
+                stats_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(profile, chat_session_id) DO UPDATE SET
+                profile = excluded.profile,
+                parent_message_id_json = excluded.parent_message_id_json,
+                title = excluded.title,
+                preview = excluded.preview,
+                turn_count = excluded.turn_count,
+                updated_at = excluded.updated_at,
+                messages_json = excluded.messages_json,
+                stats_json = excluded.stats_json
+            """,
+            (
+                profile,
+                chat_session_id,
+                _dump_parent_message_id(parent_message_id),
+                title,
+                preview,
+                turn_count,
+                created_at,
+                updated_at,
+                _dump_messages(messages),
+                _dump_stats(stats),
+            ),
+        )

@@ -38,6 +38,10 @@ captures/
 .logs/
 tmp/
 
+# Manual MITM/upload test artifacts
+scripts/
+test-upload-document.txt
+
 # Editor and OS files
 .idea/
 .vscode/

@@ -1,0 +1,8 @@
+DeepSeek upload test document.
+
+Project: deepseek-chat-python
+Purpose: Verify document upload capture through the MITM script.
+
+Unique marker: DEEPSEEK_UPLOAD_CAPTURE_TEST_20250801
+
+Please summarize this document in one short sentence.

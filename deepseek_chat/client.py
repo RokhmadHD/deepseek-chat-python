@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import mimetypes
 import os
 import re
 from dataclasses import dataclass
@@ -107,6 +108,15 @@ class ChatTurn:
     raw: str
 
 
+@dataclass
+class UploadedFile:
+    id: str
+    file_name: str
+    file_size: int
+    status: str
+    token_usage: int | None = None
+
+
 class DeepSeekClient:
     def __init__(self, profile: str = DEFAULT_PROFILE) -> None:
         self.profile = profile
@@ -173,12 +183,13 @@ class DeepSeekClient:
             raise RuntimeError(f"DeepSeek returned no chat session: {data}")
         return str(session_id)
 
-    def get_pow_challenge(self) -> dict[str, Any]:
-        log.info("requesting pow challenge target=%s", self.pow_target_path)
+    def get_pow_challenge(self, target_path: str | None = None) -> dict[str, Any]:
+        target = target_path or self.pow_target_path
+        log.info("requesting pow challenge target=%s", target)
         response = self.client.post(
             f"{self.api_base}/api/v0/chat/create_pow_challenge",
             headers=self.headers(),
-            json={"target_path": self.pow_target_path},
+            json={"target_path": target},
         )
         log.info("pow challenge status=%s", response.status_code)
         response.raise_for_status()
@@ -202,7 +213,73 @@ class DeepSeekClient:
         }
         return base64.b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode()
 
-    def chat(self, prompt: str, session_id: str | None = None, parent_message_id: str | int | None = None) -> ChatTurn:
+    def upload_file(self, path: str | Path) -> UploadedFile:
+        file_path = Path(path).expanduser().resolve()
+        if not file_path.is_file():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        file_size = file_path.stat().st_size
+        content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+        challenge = self.get_pow_challenge("/api/v0/file/upload_file")
+        pow_response = self.solve_pow(challenge)
+        headers = self.headers(
+            {
+                "x-thinking-enabled": "1" if self.thinking_enabled else "0",
+                "x-model-type": self.model_type,
+                "x-file-size": str(file_size),
+                "x-ds-pow-response": pow_response,
+            }
+        )
+        headers.pop("content-type", None)
+        log.info("upload file path=%s size=%s content_type=%s", file_path, file_size, content_type)
+        with file_path.open("rb") as file:
+            response = self.client.post(
+                f"{self.api_base}/api/v0/file/upload_file",
+                headers=headers,
+                files={"file": (file_path.name, file, content_type)},
+            )
+        log.info("upload status=%s response_bytes=%s", response.status_code, len(response.content))
+        if response.status_code >= 400:
+            log.error("upload error status=%s body=%s", response.status_code, response.text[:2000])
+        response.raise_for_status()
+        return self.parse_uploaded_file(response.json())
+
+    def fetch_file(self, file_id: str) -> UploadedFile:
+        response = self.client.get(
+            f"{self.api_base}/api/v0/file/fetch_files",
+            headers=self.headers(),
+            params={"file_ids": file_id},
+        )
+        log.info("fetch_file status=%s file_id=%s", response.status_code, file_id)
+        response.raise_for_status()
+        data = response.json()
+        files = data.get("data", {}).get("biz_data", {}).get("files", [])
+        if not files:
+            raise RuntimeError(f"DeepSeek returned no file metadata: {data}")
+        return self.parse_file_data(files[0])
+
+    def parse_uploaded_file(self, data: dict[str, Any]) -> UploadedFile:
+        file_data = data.get("data", {}).get("biz_data", {})
+        if not isinstance(file_data, dict) or not file_data.get("id"):
+            raise RuntimeError(f"DeepSeek returned no uploaded file id: {data}")
+        return self.parse_file_data(file_data)
+
+    def parse_file_data(self, file_data: dict[str, Any]) -> UploadedFile:
+        return UploadedFile(
+            id=str(file_data["id"]),
+            file_name=str(file_data.get("file_name") or file_data["id"]),
+            file_size=int(file_data.get("file_size") or 0),
+            status=str(file_data.get("status") or ""),
+            token_usage=file_data.get("token_usage") if isinstance(file_data.get("token_usage"), int) else None,
+        )
+
+    def chat(
+        self,
+        prompt: str,
+        session_id: str | None = None,
+        parent_message_id: str | int | None = None,
+        ref_file_ids: list[str] | None = None,
+    ) -> ChatTurn:
         log.info("chat request profile=%s session=%s parent=%s prompt_len=%s", self.profile, session_id, parent_message_id, len(prompt))
         session_id = session_id or self.create_session()
         challenge = self.get_pow_challenge()
@@ -215,7 +292,7 @@ class DeepSeekClient:
                 "parent_message_id": parent_message_id,
                 "model_type": self.model_type,
                 "prompt": prompt,
-                "ref_file_ids": [],
+                "ref_file_ids": ref_file_ids or [],
                 "thinking_enabled": self.thinking_enabled,
                 "search_enabled": self.search_enabled,
                 "action": None,

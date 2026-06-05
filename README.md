@@ -92,22 +92,28 @@ Terminal TUI:
 
 ```bash
 deepseek-chat-tui
+deepseek-chat-tui resume
 ```
 
 The TUI uses Textual. Controls:
 
 - `Enter` to send a message.
+- `/attach /path/to/file` to upload a document and attach it to future prompts.
+- `/files` to list attached files.
+- `/clear-files` to clear attached files.
 - `/model` to toggle `model_type` between `default` and `expert`.
 - `/model default` to use the default model type.
 - `/model expert` to use the expert model type.
 - `/quit`, `/exit`, or `/q` to exit.
 - `Ctrl+L` to clear the chat.
 
+`deepseek-chat-tui resume` shows saved chat sessions for the active profile, lets you move with arrow keys, and opens the selected session.
+
 TUI responses are displayed progressively like streaming. For now, the HTTP request is still non-streaming, so text starts appearing after the full response is received from DeepSeek.
 
 While a request is running, the TUI shows a loader/spinner in the status bar and assistant label.
 
-Below each AI response, the TUI shows metrics from left to right: duration, estimated output tokens, tokens/s, and estimated cost. The cost estimate uses `DEEPSEEK_ESTIMATED_OUTPUT_COST_PER_1M_TOKENS_USD`.
+The TUI shows chat on the left and estimated token statistics on the right. The stats panel includes the last response duration, estimated output tokens, tokens/s, estimated cost, session totals, and a compact command list. It auto-hides on narrow terminals. The cost estimate uses `DEEPSEEK_ESTIMATED_OUTPUT_COST_PER_1M_TOKENS_USD`.
 
 ## Configuration
 
