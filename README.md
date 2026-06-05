@@ -1,30 +1,30 @@
 # deepseek-chat-python
 
-Client Python minimal untuk chat biasa ke DeepSeek web.
+Minimal Python client for regular chat with DeepSeek web.
 
-Project ini sengaja dibuat kecil dulu: belum ada parser, belum ada OpenAI-compatible server, belum ada tool-calling. Fokusnya hanya bisa kirim prompt ke DeepSeek web dan print jawaban teks.
+This project is intentionally small for now: no parser, no OpenAI-compatible server, and no tool calling yet. The focus is only sending prompts to DeepSeek web and printing text responses.
 
 ## Support Development
 
-Jika Anda menemukan proyek ini berguna, pertimbangkan untuk mendukung pengembangannya:
+If you find this project useful, consider supporting its development:
 
 [![Saweria](https://img.shields.io/badge/Saweria-Support-orange?style=for-the-badge&logo=ko-fi&logoColor=white)](https://saweria.co/RokhmadHD)
 
 
-## Fitur
+## Features
 
-- Membuat chat session baru lewat `/api/v0/chat_session/create`.
-- Mengambil PoW challenge lewat `/api/v0/chat/create_pow_challenge`.
-- Solve PoW dengan wasm resmi DeepSeek.
-- Mengirim prompt ke `/api/v0/chat/completion`.
-- Parse response SSE DeepSeek menjadi teks biasa.
-- Bisa dipakai sekali jalan atau mode interaktif.
+- Creates a new chat session through `/api/v0/chat_session/create`.
+- Fetches the PoW challenge through `/api/v0/chat/create_pow_challenge`.
+- Solves PoW with DeepSeek's official wasm.
+- Sends prompts to `/api/v0/chat/completion`.
+- Parses DeepSeek SSE responses into plain text.
+- Can be used as a one-shot command or in interactive mode.
 
-## Kebutuhan
+## Requirements
 
-- Python 3.11 atau lebih baru.
-- Session DeepSeek web yang masih valid.
-- Network access untuk install dependency dan download wasm PoW pertama kali.
+- Python 3.11 or newer.
+- A valid DeepSeek web session.
+- Network access to install dependencies and download the PoW wasm on first use.
 
 ## Setup
 
@@ -36,7 +36,7 @@ pip install -e .
 cp .env.example .env
 ```
 
-`.env` hanya untuk config non-secret. Token dan cookie login disimpan ke SQLite.
+`.env` is only for non-secret configuration. Login tokens and cookies are stored in SQLite.
 
 Login:
 
@@ -44,98 +44,98 @@ Login:
 deepseek-chat-login
 ```
 
-Command ini membuka browser, tunggu kamu login ke DeepSeek web, lalu menyimpan capture ke `captures/` dan auth ke `.data/session.db`. Kalau login ulang, profile yang sama akan di-replace. Secara default command ini memakai Camoufox di `/home/tensanq/.cache/camoufox/camoufox` kalau binary itu ada.
+This command opens a browser. Wait until you are logged in to DeepSeek web, then it stores captures in `captures/` and auth data in `.data/session.db`. If you log in again, the same profile will be replaced. By default, this command uses Camoufox at `/home/tensanq/.cache/camoufox/camoufox` if that binary exists.
 
-Kalau mau paksa path Camoufox tertentu:
+To force a specific Camoufox path:
 
 ```bash
 CAMOUFOX_BIN=/home/tensanq/.cache/camoufox/camoufox deepseek-chat-login
 ```
 
-Kalau auto-detect login gagal, pakai mode manual:
+If login auto-detection fails, use manual mode:
 
 ```bash
 deepseek-chat-login --manual
 ```
 
-Profile lain:
+Other profiles:
 
 ```bash
 deepseek-chat-login --profile kerja
-deepseek-chat --profile kerja "hai bang"
+deepseek-chat --profile kerja "hello"
 deepseek-chat-tui --profile kerja
 ```
 
-Kalau belum ada browser Playwright di mesin:
+If Playwright browsers are not installed on the machine:
 
 ```bash
 python3 -m playwright install chromium
 ```
 
-## Cara Pakai
+## Usage
 
-Sekali jalan:
+One-shot command:
 
 ```bash
-deepseek-chat "hai bang"
+deepseek-chat "hello"
 ```
 
-Mode interaktif:
+Interactive mode:
 
 ```bash
 deepseek-chat
 ```
 
-Di mode interaktif, session dan `parent_message_id` dipertahankan selama proses masih hidup, jadi percakapan lanjut dalam thread yang sama.
+In interactive mode, the session and `parent_message_id` are preserved while the process is alive, so the conversation continues in the same thread.
 
-TUI terminal:
+Terminal TUI:
 
 ```bash
 deepseek-chat-tui
 ```
 
-TUI memakai Textual. Kontrol:
+The TUI uses Textual. Controls:
 
-- `Enter` untuk kirim pesan.
-- `/model` untuk toggle `model_type` antara `default` dan `expert`.
-- `/model default` untuk model type default.
-- `/model expert` untuk model type expert.
-- `/quit`, `/exit`, atau `/q` untuk keluar.
-- `Ctrl+L` untuk clear chat.
+- `Enter` to send a message.
+- `/model` to toggle `model_type` between `default` and `expert`.
+- `/model default` to use the default model type.
+- `/model expert` to use the expert model type.
+- `/quit`, `/exit`, or `/q` to exit.
+- `Ctrl+L` to clear the chat.
 
-Response TUI ditampilkan bertahap seperti streaming. Untuk saat ini HTTP request masih non-streaming, jadi teks mulai muncul setelah response lengkap diterima dari DeepSeek.
+TUI responses are displayed progressively like streaming. For now, the HTTP request is still non-streaming, so text starts appearing after the full response is received from DeepSeek.
 
-Saat request berjalan, TUI menampilkan loader/spinner di status bar dan label assistant.
+While a request is running, the TUI shows a loader/spinner in the status bar and assistant label.
 
-Di bawah response AI, TUI menampilkan metrik kiri-ke-kanan: durasi, estimasi token output, token/s, dan estimasi cost. Estimasi cost memakai `DEEPSEEK_ESTIMATED_OUTPUT_COST_PER_1M_TOKENS_USD`.
+Below each AI response, the TUI shows metrics from left to right: duration, estimated output tokens, tokens/s, and estimated cost. The cost estimate uses `DEEPSEEK_ESTIMATED_OUTPUT_COST_PER_1M_TOKENS_USD`.
 
-## Konfigurasi
+## Configuration
 
-Env penting:
+Important env vars:
 
-| Env | Default | Keterangan |
+| Env | Default | Description |
 | --- | --- | --- |
 | `DEEPSEEK_API_BASE` | `https://chat.deepseek.com` | Base URL DeepSeek web. |
-| `DEEPSEEK_MODEL_TYPE` | `default` | Model type yang dikirim ke DeepSeek. |
-| `DEEPSEEK_SEARCH_ENABLED` | `true` | Aktifkan search di request chat. |
-| `DEEPSEEK_THINKING_ENABLED` | `false` | Aktifkan thinking mode. |
-| `DEEPSEEK_PREEMPT` | `false` | Nilai `preempt` request. |
-| `DEEPSEEK_POW_WASM_CACHE` | `.cache/sha3_wasm_bg.7b9ca65ddd.wasm` | Lokasi cache wasm PoW. |
+| `DEEPSEEK_MODEL_TYPE` | `default` | Model type sent to DeepSeek. |
+| `DEEPSEEK_SEARCH_ENABLED` | `true` | Enables search in chat requests. |
+| `DEEPSEEK_THINKING_ENABLED` | `false` | Enables thinking mode. |
+| `DEEPSEEK_PREEMPT` | `false` | Request `preempt` value. |
+| `DEEPSEEK_POW_WASM_CACHE` | `.cache/sha3_wasm_bg.7b9ca65ddd.wasm` | PoW wasm cache location. |
 
-Auth login disimpan di `.data/session.db` dan tidak masuk git.
+Login auth is stored in `.data/session.db` and is not committed to git.
 
 ## Troubleshooting
 
-Jika dapat `401` atau `403`, auth/cookie kemungkinan sudah expired atau tidak lengkap. Jalankan `deepseek-chat-login` lagi untuk replace session SQLite.
+If you get `401` or `403`, the auth/cookie is likely expired or incomplete. Run `deepseek-chat-login` again to replace the SQLite session.
 
-Jika error saat download wasm, cek network lalu ulangi command. File wasm akan dicache di `.cache/`.
+If an error occurs while downloading the wasm, check the network and rerun the command. The wasm file will be cached in `.cache/`.
 
-Jika command `deepseek-chat` tidak ditemukan, pastikan virtualenv aktif dan `pip install -e .` sudah berhasil.
+If the `deepseek-chat` command is not found, make sure the virtualenv is active and `pip install -e .` completed successfully.
 
-Jika `deepseek-chat-login` gagal membuka browser, pastikan Camoufox masih ada di `/home/tensanq/.cache/camoufox/camoufox`, atau set `CAMOUFOX_BIN=/path/to/camoufox`. Fallback terakhir: install browser Playwright dengan `python3 -m playwright install chromium`.
+If `deepseek-chat-login` fails to open a browser, make sure Camoufox still exists at `/home/tensanq/.cache/camoufox/camoufox`, or set `CAMOUFOX_BIN=/path/to/camoufox`. Last fallback: install a Playwright browser with `python3 -m playwright install chromium`.
 
-Log error ditulis ke `.logs/deepseek-chat.log`.
+Error logs are written to `.logs/deepseek-chat.log`.
 
 ## Status
 
-Versi ini adalah port awal untuk chat biasa. Bagian parser dari project lama sengaja ditinggalkan dulu supaya fondasi client lebih sederhana dan mudah dites.
+This version is an early port for regular chat. The parser from the old project was intentionally left out for now so the client foundation stays simpler and easier to test.
