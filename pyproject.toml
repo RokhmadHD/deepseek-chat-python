@@ -18,7 +18,10 @@ deepseek-chat-login = "deepseek_chat.login:main"
 deepseek-chat-tui = "deepseek_chat.tui:main"
 
 [tool.setuptools.packages.find]
-include = ["deepseek_chat*"]
+include = ["deepseek_chat*", "tools*"]
+
+[tool.setuptools.package-data]
+deepseek_chat = ["settings/*.md"]
 
 [build-system]
 requires = ["setuptools>=69.0"]

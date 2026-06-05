@@ -5,9 +5,11 @@ import json
 import mimetypes
 import os
 import re
-from dataclasses import dataclass
+import sys
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -15,6 +17,12 @@ from .logging_config import get_logger
 from .session_store import DEFAULT_PROFILE, StoredSession, load_session
 
 log = get_logger("client")
+DEFAULT_SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "settings" / "system.md"
+DEFAULT_MAX_TOOL_ROUNDS = 4
+DEFAULT_TOOL_RESULT_MAX_BYTES = 120_000
+ToolEventCallback = Callable[[dict[str, Any]], None]
+ToolApprovalDecision = str
+ToolApprovalCallback = Callable[[str, dict[str, Any]], ToolApprovalDecision]
 
 
 def env_bool(name: str, fallback: bool) -> bool:
@@ -22,6 +30,17 @@ def env_bool(name: str, fallback: bool) -> bool:
     if raw is None:
         return fallback
     return raw.lower() in {"1", "true", "yes", "on"}
+
+
+def execute_registered_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    try:
+        from tools import execute_tool
+    except ModuleNotFoundError:
+        project_root = Path(__file__).resolve().parents[1]
+        if str(project_root) not in sys.path:
+            sys.path.insert(0, str(project_root))
+        from tools import execute_tool
+    return execute_tool(name, arguments)
 
 
 def read_cookie_header(session: StoredSession | None = None) -> str:
@@ -100,12 +119,65 @@ def render_sse_text(raw: str) -> str:
     return "".join(out)
 
 
+def parse_tool_message(text: str) -> dict[str, Any] | None:
+    stripped = strip_code_fence(text.strip())
+    if not stripped:
+        return None
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            parsed = json.loads(stripped[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def strip_code_fence(text: str) -> str:
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if len(lines) >= 3 and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return text
+
+
+def string_value(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def summarize_tool_result(result: dict[str, Any]) -> str:
+    if "result_count" in result:
+        return f"{result.get('result_count')} results"
+    if "match_count" in result:
+        return f"{result.get('match_count')} matches"
+    if "change_count" in result:
+        return f"{result.get('change_count')} changes"
+    if "bytes" in result:
+        return f"{result.get('bytes')} bytes"
+    if "content" in result:
+        return f"{len(string_value(result.get('content')))} chars"
+    return "ok"
+
+
+def truncate_text(text: str, max_bytes: int) -> str:
+    if len(text.encode("utf-8")) <= max_bytes:
+        return text
+    encoded = text.encode("utf-8")[: max(0, max_bytes - 40)]
+    return encoded.decode("utf-8", errors="ignore") + "...[truncated]"
+
+
 @dataclass
 class ChatTurn:
     text: str
     session_id: str
     parent_message_id: str | int | None
     raw: str
+    tool_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -130,6 +202,11 @@ class DeepSeekClient:
         self.search_enabled = env_bool("DEEPSEEK_SEARCH_ENABLED", True)
         self.thinking_enabled = env_bool("DEEPSEEK_THINKING_ENABLED", False)
         self.preempt = env_bool("DEEPSEEK_PREEMPT", False)
+        self.system_prompt_enabled = env_bool("DEEPSEEK_SYSTEM_PROMPT_ENABLED", True)
+        self.system_prompt_path = Path(os.getenv("DEEPSEEK_SYSTEM_PROMPT_PATH", str(DEFAULT_SYSTEM_PROMPT_PATH)))
+        self.system_prompt = self.load_system_prompt()
+        self.max_tool_rounds = int(os.getenv("DEEPSEEK_MAX_TOOL_ROUNDS", str(DEFAULT_MAX_TOOL_ROUNDS)))
+        self.tool_result_max_bytes = int(os.getenv("DEEPSEEK_TOOL_RESULT_MAX_BYTES", str(DEFAULT_TOOL_RESULT_MAX_BYTES)))
         self.pow_target_path = os.getenv("DEEPSEEK_POW_TARGET_PATH", "/api/v0/chat/completion")
         self.client = httpx.Client(timeout=httpx.Timeout(120.0, connect=30.0))
 
@@ -182,6 +259,146 @@ class DeepSeekClient:
         if not session_id:
             raise RuntimeError(f"DeepSeek returned no chat session: {data}")
         return str(session_id)
+
+    def load_system_prompt(self) -> str:
+        if not self.system_prompt_enabled:
+            return ""
+        try:
+            return self.system_prompt_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            log.warning("system prompt file not found path=%s", self.system_prompt_path)
+            return ""
+
+    def prompt_for_request(self, prompt: str, *, is_new_session: bool) -> str:
+        if not is_new_session or not self.system_prompt:
+            return prompt
+        return (
+            "<SYSTEM_INSTRUCTIONS>\n"
+            f"{self.system_prompt}\n"
+            "</SYSTEM_INSTRUCTIONS>\n\n"
+            "<USER_MESSAGE>\n"
+            f"{prompt}\n"
+            "</USER_MESSAGE>"
+        )
+
+    def chat_with_tools(
+        self,
+        prompt: str,
+        session_id: str | None = None,
+        parent_message_id: str | int | None = None,
+        ref_file_ids: list[str] | None = None,
+        on_tool_event: ToolEventCallback | None = None,
+        on_tool_approval: ToolApprovalCallback | None = None,
+    ) -> ChatTurn:
+        turn = self.chat(prompt, session_id=session_id, parent_message_id=parent_message_id, ref_file_ids=ref_file_ids)
+        tool_events: list[dict[str, Any]] = []
+
+        for _round in range(max(0, self.max_tool_rounds)):
+            message = parse_tool_message(turn.text)
+            if message is None:
+                turn.tool_events = tool_events
+                return turn
+
+            message_type = message.get("type")
+            if message_type == "response":
+                turn.text = string_value(message.get("content"))
+                turn.tool_events = tool_events
+                return turn
+
+            if message_type != "tool_call":
+                turn.text = f"Invalid tool response type: {message_type}"
+                turn.tool_events = tool_events
+                return turn
+
+            tool_name = string_value(message.get("tool"))
+            arguments = message.get("arguments")
+            if not isinstance(arguments, dict):
+                arguments = {}
+
+            call_event = {"type": "tool_call", "tool": tool_name, "arguments": arguments}
+            tool_events.append(call_event)
+            if on_tool_event:
+                on_tool_event(call_event)
+            approval_denied = False
+            if tool_name == "write_file":
+                try:
+                    approval = "deny" if on_tool_approval is None else on_tool_approval(tool_name, arguments)
+                except Exception:
+                    log.exception("tool approval failed tool=%s", tool_name)
+                    approval = "deny"
+                approval_denied = approval == "deny"
+
+            started_at = time.perf_counter()
+            try:
+                if approval_denied:
+                    raise PermissionError("write_file denied by user")
+                result = execute_registered_tool(tool_name, arguments)
+                result_event = {
+                    "type": "tool_result",
+                    "tool": tool_name,
+                    "ok": True,
+                    "summary": summarize_tool_result(result),
+                    "elapsed": time.perf_counter() - started_at,
+                }
+                tool_events.append(result_event)
+                if on_tool_event:
+                    on_tool_event(result_event)
+                tool_payload = {"ok": True, "result": result}
+            except PermissionError as exc:
+                result_event = {
+                    "type": "tool_result",
+                    "tool": tool_name,
+                    "ok": False,
+                    "summary": str(exc),
+                    "elapsed": 0.0,
+                }
+                tool_events.append(result_event)
+                if on_tool_event:
+                    on_tool_event(result_event)
+                tool_payload = {"ok": False, "error": str(exc)}
+            except Exception as exc:
+                log.exception("tool execution failed tool=%s", tool_name)
+                result_event = {
+                    "type": "tool_result",
+                    "tool": tool_name,
+                    "ok": False,
+                    "summary": str(exc),
+                    "elapsed": time.perf_counter() - started_at,
+                }
+                tool_events.append(result_event)
+                if on_tool_event:
+                    on_tool_event(result_event)
+                tool_payload = {"ok": False, "error": str(exc)}
+
+            followup_prompt = self.tool_result_prompt(tool_name, arguments, tool_payload)
+            turn = self.chat(
+                followup_prompt,
+                session_id=turn.session_id,
+                parent_message_id=turn.parent_message_id,
+                ref_file_ids=ref_file_ids,
+            )
+
+        turn.tool_events = tool_events
+        return turn
+
+    def tool_result_prompt(self, tool_name: str, arguments: dict[str, Any], payload: dict[str, Any]) -> str:
+        encoded = json.dumps(
+            {
+                "tool": tool_name,
+                "arguments": arguments,
+                **payload,
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        encoded = truncate_text(encoded, self.tool_result_max_bytes)
+        return (
+            "<TOOL_RESULT>\n"
+            f"{encoded}\n"
+            "</TOOL_RESULT>\n\n"
+            "Return the next valid JSON object now. If this result answers the user, return a response object. "
+            "If another tool is required, return one tool_call object."
+        )
 
     def get_pow_challenge(self, target_path: str | None = None) -> dict[str, Any]:
         target = target_path or self.pow_target_path
@@ -281,7 +498,9 @@ class DeepSeekClient:
         ref_file_ids: list[str] | None = None,
     ) -> ChatTurn:
         log.info("chat request profile=%s session=%s parent=%s prompt_len=%s", self.profile, session_id, parent_message_id, len(prompt))
+        is_new_session = session_id is None and parent_message_id is None
         session_id = session_id or self.create_session()
+        request_prompt = self.prompt_for_request(prompt, is_new_session=is_new_session)
         challenge = self.get_pow_challenge()
         pow_response = self.solve_pow(challenge)
         response = self.client.post(
@@ -291,7 +510,7 @@ class DeepSeekClient:
                 "chat_session_id": session_id,
                 "parent_message_id": parent_message_id,
                 "model_type": self.model_type,
-                "prompt": prompt,
+                "prompt": request_prompt,
                 "ref_file_ids": ref_file_ids or [],
                 "thinking_enabled": self.thinking_enabled,
                 "search_enabled": self.search_enabled,

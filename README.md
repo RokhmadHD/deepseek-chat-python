@@ -2,7 +2,7 @@
 
 Minimal Python client for regular chat with DeepSeek web.
 
-This project is intentionally small for now: no parser, no OpenAI-compatible server, and no tool calling yet. The focus is only sending prompts to DeepSeek web and printing text responses.
+This project is intentionally small for now: no OpenAI-compatible server, but it does include a compact tool-calling loop, a TUI, and local workspace tools.
 
 ## Support Development
 
@@ -17,7 +17,7 @@ If you find this project useful, consider supporting its development:
 - Fetches the PoW challenge through `/api/v0/chat/create_pow_challenge`.
 - Solves PoW with DeepSeek's official wasm.
 - Sends prompts to `/api/v0/chat/completion`.
-- Parses DeepSeek SSE responses into plain text.
+- Parses DeepSeek SSE responses and drives tool-call responses.
 - Can be used as a one-shot command or in interactive mode.
 
 ## Requirements
@@ -98,9 +98,12 @@ deepseek-chat-tui resume
 The TUI uses Textual. Controls:
 
 - `Enter` to send a message.
+- Large or multiline pastes are shown as `[pasted for ... chars]` but sent with the full pasted text.
 - `/attach /path/to/file` to upload a document and attach it to future prompts.
 - `/files` to list attached files.
 - `/clear-files` to clear attached files.
+- `/copy`, `/copy last`, `/copy user`, or `/copy all` to copy chat text to clipboard.
+- `/copy raw` to write a raw transcript file under `.logs/`.
 - `/model` to toggle `model_type` between `default` and `expert`.
 - `/model default` to use the default model type.
 - `/model expert` to use the expert model type.
@@ -125,10 +128,27 @@ Important env vars:
 | `DEEPSEEK_MODEL_TYPE` | `default` | Model type sent to DeepSeek. |
 | `DEEPSEEK_SEARCH_ENABLED` | `true` | Enables search in chat requests. |
 | `DEEPSEEK_THINKING_ENABLED` | `false` | Enables thinking mode. |
+| `DEEPSEEK_SYSTEM_PROMPT_ENABLED` | `true` | Injects `deepseek_chat/settings/system.md` into new chat sessions. |
+| `DEEPSEEK_SYSTEM_PROMPT_PATH` | `deepseek_chat/settings/system.md` | Optional override for the system prompt file. |
+| `DEEPSEEK_MAX_TOOL_ROUNDS` | `4` | Maximum tool-call iterations before returning the latest model output. |
+| `DEEPSEEK_TOOL_RESULT_MAX_BYTES` | `120000` | Maximum serialized tool result size sent back to DeepSeek. |
 | `DEEPSEEK_PREEMPT` | `false` | Request `preempt` value. |
 | `DEEPSEEK_POW_WASM_CACHE` | `.cache/sha3_wasm_bg.7b9ca65ddd.wasm` | PoW wasm cache location. |
+| `SEARXNG_URL` | `http://localhost:8080` | Base URL for local SearXNG-backed tools. |
+| `SEARXNG_LANGUAGE` | `en` | Default SearXNG search language. |
 
 Login auth is stored in `.data/session.db` and is not committed to git.
+
+## Tools
+
+The `tools` package contains callable tool implementations and JSON schemas for future tool-calling integration.
+
+- `search_web`: searches one query through SearXNG.
+- `multi_search`: searches multiple queries through SearXNG and deduplicates URLs for deep search.
+- `list_dir`, `tree_dir`, `read_file`, `search_files`, `write_file`: workspace-scoped filesystem tools. `write_file` asks for TUI approval before it executes.
+- `git_status`, `git_diff`, `git_log`: read-only project state tools.
+- `run_command`: allowlisted project commands such as compile checks, pytest, and read-only git commands.
+- `get_time`, `calculate`, `json_validate`, `format_json`: utility tools.
 
 ## Troubleshooting
 

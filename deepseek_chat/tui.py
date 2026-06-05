@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import shlex
+import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import Input, Label, ListItem, ListView, Markdown, Static
 
 from .client import DeepSeekClient, UploadedFile
-from .logging_config import get_logger, setup_logging
+from .logging_config import get_logger, project_root, setup_logging
 from .session_store import ChatSessionRecord, list_chat_sessions, save_chat_session
 
 log = get_logger("tui")
@@ -29,9 +34,15 @@ ROLE_ICONS = {
     "error": "×",
 }
 MODEL_TYPES = ["default", "expert"]
+PASTE_SUMMARY_THRESHOLD = 120
 COMMANDS = [
     ("/attach", "upload file"),
     ("/clear-files", "clear files"),
+    ("/copy", "copy last reply"),
+    ("/copy all", "copy transcript"),
+    ("/copy last", "copy last reply"),
+    ("/copy raw", "export raw transcript"),
+    ("/copy user", "copy last user message"),
     ("/exit", "quit"),
     ("/files", "list files"),
     ("/model", "toggle model"),
@@ -82,6 +93,156 @@ def compact_text(text: str, limit: int) -> str:
     if len(normalized) <= limit:
         return normalized
     return normalized[: max(0, limit - 1)].rstrip() + "…"
+
+
+def workspace_root_path() -> Path:
+    return Path(os.getenv("TOOL_WORKSPACE_ROOT", str(project_root()))).resolve()
+
+
+def resolve_workspace_path(path: str) -> Path:
+    root = workspace_root_path()
+    target = (root / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
+    if target != root and root not in target.parents:
+        raise ValueError(f"path is outside workspace: {path}")
+    return target
+
+
+def relative_workspace_path(path: Path) -> str:
+    return str(path.resolve().relative_to(workspace_root_path()))
+
+
+def preview_write_content(content: str, limit: int = 420) -> str:
+    preview = "\n".join(content.splitlines()[:8]).strip()
+    return compact_text(preview, limit) if preview else "(empty)"
+
+
+class PromptInput(Input):
+    """Single-line input that summarizes large pastes but submits their full text."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.pasted_fragments: list[tuple[str, str]] = []
+
+    def _on_paste(self, event: events.Paste) -> None:
+        if event.text:
+            self.insert_paste(event.text)
+        event.stop()
+        event.prevent_default()
+
+    def action_paste(self) -> None:
+        clipboard = self.app.clipboard
+        if clipboard:
+            self.insert_paste(clipboard)
+
+    def insert_paste(self, text: str) -> None:
+        insert = self.paste_marker(text) if self.should_summarize_paste(text) else text.splitlines()[0]
+        selection = self.selection
+        if selection.is_empty:
+            self.insert_text_at_cursor(insert)
+        else:
+            self.replace(insert, *selection)
+
+    def paste_marker(self, text: str) -> str:
+        marker = f"[pasted for {len(text)} chars]"
+        self.pasted_fragments.append((marker, text))
+        return marker
+
+    def should_summarize_paste(self, text: str) -> bool:
+        return len(text) > PASTE_SUMMARY_THRESHOLD or "\n" in text
+
+    def resolved_value(self) -> str:
+        resolved = self.value
+        for marker, content in self.pasted_fragments:
+            resolved = resolved.replace(marker, content, 1)
+        return resolved
+
+    def clear_prompt(self) -> None:
+        self.value = ""
+        self.pasted_fragments.clear()
+
+
+class WriteFileApprovalScreen(ModalScreen[str | None]):
+    CSS = """
+    Screen {
+        align: center middle;
+    }
+
+    #approval-shell {
+        width: 78;
+        height: auto;
+        border: solid $secondary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #approval-body {
+        height: auto;
+        color: $text-muted;
+        text-opacity: 75%;
+    }
+
+    #approval-list {
+        height: auto;
+        max-height: 7;
+        margin-top: 1;
+        border: none;
+        background: $surface;
+        color: $text-muted 70%;
+    }
+
+    ListItem {
+        padding: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "deny", "Deny"),
+        ("q", "deny", "Deny"),
+    ]
+
+    def __init__(self, path: str, directory: str, content: str, overwrite: bool, create_dirs: bool) -> None:
+        super().__init__()
+        self.path = path
+        self.directory = directory
+        self.content = content
+        self.overwrite = overwrite
+        self.create_dirs = create_dirs
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="approval-shell"):
+            body = (
+                "Approve write_file request\n"
+                "Use Up/Down and Enter. Esc or q denies.\n\n"
+                f"Path: {self.path}\n"
+                f"Directory: {self.directory}\n"
+                f"Overwrite: {'yes' if self.overwrite else 'no'}\n"
+                f"Create dirs: {'yes' if self.create_dirs else 'no'}\n\n"
+                f"Preview:\n{preview_write_content(self.content)}"
+            )
+            yield Static(body, id="approval-body")
+            yield ListView(
+                ListItem(Label("Approve once"), id="approve-once"),
+                ListItem(Label("Approve this directory"), id="approve-dir"),
+                ListItem(Label("Deny"), id="deny"),
+                id="approval-list",
+            )
+
+    def on_mount(self) -> None:
+        approval_list = self.query_one("#approval-list", ListView)
+        approval_list.index = 0
+        approval_list.focus()
+
+    def action_deny(self) -> None:
+        self.dismiss("deny")
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        selected_id = event.item.id or ""
+        if selected_id == "approve-once":
+            self.dismiss("approve_once")
+        elif selected_id == "approve-dir":
+            self.dismiss("approve_dir")
+        elif selected_id == "deny":
+            self.dismiss("deny")
 
 
 class ChatSessionPicker(App[ChatSessionRecord | None]):
@@ -266,7 +427,7 @@ class DeepSeekTui(App[None]):
     }
 
     #prompt:focus {
-        border: none;
+        border-left: ascii $secondary;
     }
 
     .hidden {
@@ -289,6 +450,7 @@ class DeepSeekTui(App[None]):
 
     .system-role {
         color: rgb(230, 136, 64);
+        text-opacity: 70%;
     }
 
     .spacing {
@@ -300,6 +462,13 @@ class DeepSeekTui(App[None]):
     }
 
     .bubble {
+        margin-bottom: 0;
+    }
+
+    .tool-events {
+        color: $text-muted;
+        text-opacity: 65%;
+        margin-top: 0;
         margin-bottom: 0;
     }
     """
@@ -339,6 +508,7 @@ class DeepSeekTui(App[None]):
         self.last_tokens_per_second = float(session_stats.get("last_tokens_per_second", 0.0))
         self.last_estimated_cost = float(session_stats.get("last_estimated_cost", 0.0))
         self.attached_files: list[UploadedFile] = []
+        self.approved_write_dirs: set[str] = set()
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="workspace"):
@@ -348,7 +518,7 @@ class DeepSeekTui(App[None]):
                 yield Static("", classes="spacing")                # Pendorong Tengah (1fr)
                 yield Static(self.commands_text(), id="stats-cmds")
         with Vertical(id="composer"):
-            yield Input(placeholder="Type message, /attach path, /files, /model, /quit", id="prompt")
+            yield PromptInput(placeholder="Type message, /attach path, /files, /model, /quit", id="prompt", max_length=2000000)
             yield Static(self.input_info_text(), id="input-info")
 
     def on_mount(self) -> None:
@@ -357,7 +527,7 @@ class DeepSeekTui(App[None]):
         self.sub_title = self.model_label()
         if self.session_record:
             self.title = f"deepseek-chat-python - {compact_text(self.session_label(), 24)}"
-        self.query_one("#prompt", Input).focus()
+        self.query_one("#prompt", PromptInput).focus()
         self.set_interval(1, self.update_input_info)
         self.set_interval(1, self.update_stats)
         self.set_stats_visibility(self.size.width)
@@ -369,7 +539,7 @@ class DeepSeekTui(App[None]):
         self.write_system("Type a message and press Enter. Use /model to switch model_type.")
 
     def on_click(self) -> None:
-        self.query_one("#prompt", Input).focus()
+        self.query_one("#prompt", PromptInput).focus()
 
     def on_resize(self, event: object) -> None:
         size = getattr(event, "size", None)
@@ -381,25 +551,53 @@ class DeepSeekTui(App[None]):
         self.client.close()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        prompt = event.value.strip()
-        event.input.value = ""
+        prompt_input = event.input
+        display_prompt = event.value.strip()
+        prompt = prompt_input.resolved_value().strip() if isinstance(prompt_input, PromptInput) else display_prompt
         if not prompt:
+            if isinstance(prompt_input, PromptInput):
+                prompt_input.clear_prompt()
+            else:
+                prompt_input.value = ""
             return
         if prompt in {"/q", "/quit", "/exit"}:
+            if isinstance(prompt_input, PromptInput):
+                prompt_input.clear_prompt()
+            else:
+                prompt_input.value = ""
             self.exit()
             return
         if prompt == "/files":
+            if isinstance(prompt_input, PromptInput):
+                prompt_input.clear_prompt()
+            else:
+                prompt_input.value = ""
             self.write_attached_files()
             return
         if prompt == "/clear-files":
+            if isinstance(prompt_input, PromptInput):
+                prompt_input.clear_prompt()
+            else:
+                prompt_input.value = ""
             self.attached_files.clear()
             self.update_stats()
             self.write_system("Cleared attached files.")
+            return
+        if prompt == "/copy" or prompt.startswith("/copy "):
+            if isinstance(prompt_input, PromptInput):
+                prompt_input.clear_prompt()
+            else:
+                prompt_input.value = ""
+            self.handle_copy_command(prompt)
             return
         if prompt.startswith("/attach "):
             if self.busy:
                 self.write_system("Request is still running. Wait for the current reply first.")
                 return
+            if isinstance(prompt_input, PromptInput):
+                prompt_input.clear_prompt()
+            else:
+                prompt_input.value = ""
             try:
                 parts = shlex.split(prompt)
             except ValueError as exc:
@@ -414,6 +612,10 @@ class DeepSeekTui(App[None]):
             self.upload_file(path)
             return
         if prompt == "/model" or prompt.startswith("/model "):
+            if isinstance(prompt_input, PromptInput):
+                prompt_input.clear_prompt()
+            else:
+                prompt_input.value = ""
             log.info("model command=%s", prompt)
             self.handle_model_command(prompt)
             return
@@ -421,8 +623,12 @@ class DeepSeekTui(App[None]):
             self.write_system("Request is still running. Wait for the current reply first.")
             return
 
-        self.write_user(prompt)
-        self.chat_messages.append({"role": "user", "text": prompt})
+        if isinstance(prompt_input, PromptInput):
+            prompt_input.clear_prompt()
+        else:
+            prompt_input.value = ""
+        self.write_user(display_prompt)
+        self.chat_messages.append({"role": "user", "text": display_prompt})
         self.pending_prompt = prompt
         self.busy = True
         self.create_assistant_stream()
@@ -437,11 +643,13 @@ class DeepSeekTui(App[None]):
     def send_prompt(self, prompt: str, ref_file_ids: list[str]) -> None:
         started_at = time.perf_counter()
         try:
-            turn = self.client.chat(
+            turn = self.client.chat_with_tools(
                 prompt,
                 session_id=self.session_id,
                 parent_message_id=self.parent_message_id,
                 ref_file_ids=ref_file_ids,
+                on_tool_event=lambda event: self.call_from_thread(self.on_tool_event_progress, event),
+                on_tool_approval=self.request_tool_approval,
             )
         except Exception as exc:
             log.exception("send_prompt failed")
@@ -454,6 +662,7 @@ class DeepSeekTui(App[None]):
             turn.session_id,
             turn.parent_message_id,
             elapsed,
+            turn.tool_events,
         )
 
     @work(thread=True)
@@ -488,13 +697,20 @@ class DeepSeekTui(App[None]):
         self.write_error(str(exc))
         self.write_system(f"Log: {self.log_file}")
 
-    def on_reply(self, text: str, session_id: str, parent_message_id: str | int | None, elapsed: float) -> None:
+    def on_reply(
+        self,
+        text: str,
+        session_id: str,
+        parent_message_id: str | int | None,
+        elapsed: float,
+        tool_events: list[dict[str, Any]],
+    ) -> None:
         self.session_id = session_id
         self.parent_message_id = parent_message_id
-        self.stream_reply(text, elapsed)
+        self.stream_reply(text, elapsed, tool_events)
 
     @work
-    async def stream_reply(self, text: str, elapsed: float) -> None:
+    async def stream_reply(self, text: str, elapsed: float, tool_events: list[dict[str, Any]] | None = None) -> None:
         shown = ""
         self.set_assistant_role_loading(False)
         for chunk in self.chunk_text(text):
@@ -507,6 +723,9 @@ class DeepSeekTui(App[None]):
         self.current_stream_widget = None
         self.current_stream_role = None
         self.chat_messages.append({"role": "assistant", "text": text})
+        if tool_events:
+            self.write_tool_events(tool_events)
+            self.chat_messages.append({"role": "tool", "text": self.tool_events_text(tool_events), "events": tool_events})
         self.write_metrics(text, elapsed)
         self.schedule_scroll_end(force=True)
         self.persist_chat_session(text)
@@ -546,6 +765,109 @@ class DeepSeekTui(App[None]):
     def write_error(self, text: str) -> None:
         self.add_message("error", text, "error-role")
 
+    def write_tool_events(self, events: list[dict[str, Any]]) -> None:
+        self.add_message("system", self.tool_events_text(events), "system-role", "bubble tool-events")
+
+    def on_tool_event_progress(self, event: dict[str, Any]) -> None:
+        tool = str(event.get("tool") or "tool")
+        if event.get("type") == "tool_call":
+            if tool == "write_file":
+                self.set_loader_prefix("Awaiting approval for write_file")
+            else:
+                self.set_loader_prefix(f"Running tool {tool}")
+            return
+        if event.get("type") == "tool_result":
+            elapsed = self.format_elapsed(event.get("elapsed"))
+            status = "completed" if event.get("ok") else "failed"
+            self.set_loader_prefix(f"Tool {tool} {status} in {elapsed}")
+
+    def request_tool_approval(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        if tool_name != "write_file":
+            return "approve_once"
+
+        path = str(arguments.get("path") or "")
+        content = str(arguments.get("content") or "")
+        overwrite = bool(arguments.get("overwrite", False))
+        create_dirs = bool(arguments.get("create_dirs", False))
+        try:
+            target = resolve_workspace_path(path)
+        except Exception:
+            return "deny"
+
+        target_dir = str(target.parent)
+        if target_dir in self.approved_write_dirs:
+            return "approve_once"
+
+        decision_event = threading.Event()
+        decision_box: dict[str, str] = {}
+
+        def open_dialog() -> None:
+            self.push_screen(
+                WriteFileApprovalScreen(
+                    path=relative_workspace_path(target),
+                    directory=relative_workspace_path(target.parent),
+                    content=content,
+                    overwrite=overwrite,
+                    create_dirs=create_dirs,
+                ),
+                callback=lambda decision: self.on_write_file_approval(decision, target_dir, decision_box, decision_event),
+            )
+
+        self.call_from_thread(open_dialog)
+        self.call_from_thread(lambda: self.set_loader_prefix(f"Approve write_file {compact_text(path or target.name, 28)}"))
+        decision_event.wait()
+        return decision_box.get("decision", "deny")
+
+    def on_write_file_approval(
+        self,
+        decision: str | None,
+        target_dir: str,
+        decision_box: dict[str, str],
+        decision_event: threading.Event,
+    ) -> None:
+        resolved = decision or "deny"
+        if resolved == "approve_dir":
+            self.approved_write_dirs.add(target_dir)
+            resolved = "approve_once"
+        decision_box["decision"] = resolved
+        decision_event.set()
+
+    def tool_event_text(self, event: dict[str, Any]) -> str:
+        event_type = event.get("type")
+        tool = event.get("tool", "tool")
+        if event_type == "tool_call":
+            return f"Tool call: {tool}"
+        if event_type == "tool_result":
+            status = "ok" if event.get("ok") else "failed"
+            summary = event.get("summary", "")
+            return f"Tool result: {tool} {status} ({summary})"
+        return f"Tool event: {event_type}"
+
+    def tool_events_text(self, events: list[dict[str, Any]]) -> str:
+        lines = ["Tool activity"]
+        pending_tools: list[str] = []
+        for event in events:
+            tool = str(event.get("tool") or "tool")
+            if event.get("type") == "tool_call":
+                pending_tools.append(tool)
+                continue
+            if event.get("type") == "tool_result":
+                status = "ok" if event.get("ok") else "failed"
+                summary = str(event.get("summary") or "")
+                elapsed = self.format_elapsed(event.get("elapsed"))
+                lines.append(f"- {tool}: {status} in {elapsed} ({summary})")
+        for tool in pending_tools:
+            if not any(str(event.get("tool") or "") == tool and event.get("type") == "tool_result" for event in events):
+                lines.append(f"- {tool}: started")
+        return "\n".join(lines)
+
+    def format_elapsed(self, value: object) -> str:
+        try:
+            elapsed = float(value)
+        except (TypeError, ValueError):
+            return "0.00s"
+        return f"{elapsed:.2f}s"
+
     def render_chat_history(self) -> None:
         for message in self.chat_messages:
             role = message.get("role", "")
@@ -554,6 +876,8 @@ class DeepSeekTui(App[None]):
                 self.add_message("you", text, "user-role")
             elif role == "assistant":
                 self.add_message("deepseek", text, "assistant-role")
+            elif role == "tool":
+                self.add_message("system", text, "system-role", "bubble tool-events")
 
     def write_attached_files(self) -> None:
         if not self.attached_files:
@@ -565,10 +889,82 @@ class DeepSeekTui(App[None]):
         ]
         self.write_system("Attached files:\n" + "\n".join(lines))
 
-    def add_message(self, role: str, text: str, role_class: str) -> None:
+    def handle_copy_command(self, command: str) -> None:
+        parts = command.split(maxsplit=1)
+        target = parts[1].strip().lower() if len(parts) > 1 else "last"
+        if target in {"last", "reply", "assistant"}:
+            text = self.last_message_text("assistant")
+            label = "last assistant reply"
+        elif target == "user":
+            text = self.last_message_text("user")
+            label = "last user message"
+        elif target in {"all", "chat", "transcript"}:
+            text = self.transcript_text()
+            label = "chat transcript"
+        elif target in {"raw", "file"}:
+            path = self.write_raw_transcript()
+            self.write_system(f"Wrote raw transcript: {path}")
+            return
+        else:
+            self.write_system("Usage: /copy, /copy last, /copy user, /copy all, or /copy raw.")
+            return
+
+        if not text:
+            self.write_system(f"No {label} to copy.")
+            return
+        self.copy_text_to_clipboard(text)
+        self.write_system(f"Copied {label} ({len(text)} chars).")
+
+    def last_message_text(self, role: str) -> str:
+        for message in reversed(self.chat_messages):
+            if message.get("role") == role:
+                return str(message.get("text") or "")
+        return ""
+
+    def transcript_text(self) -> str:
+        lines = []
+        for message in self.chat_messages:
+            role = message.get("role", "")
+            text = str(message.get("text") or "")
+            if role and text:
+                lines.append(f"{role}:\n{text}")
+        return "\n\n".join(lines)
+
+    def copy_text_to_clipboard(self, text: str) -> None:
+        super().copy_to_clipboard(text)
+
+    def write_raw_transcript(self) -> str:
+        output_dir = project_root() / ".logs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        session_part = self.session_id or "new-session"
+        safe_session = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in session_part)[:48]
+        path = output_dir / f"chat-raw-{safe_session}-{stamp}.md"
+        path.write_text(self.raw_transcript_text(), encoding="utf-8")
+        return str(path)
+
+    def raw_transcript_text(self) -> str:
+        payload = {
+            "profile": self.profile,
+            "session_id": self.session_id,
+            "parent_message_id": self.parent_message_id,
+            "title": self.session_title,
+            "created_at": self.session_created_at,
+            "exported_at": datetime.now().isoformat(),
+            "messages": self.chat_messages,
+            "stats": self.session_stats_payload(),
+        }
+        return (
+            "# DeepSeek Chat Raw Transcript\n\n"
+            "```json\n"
+            f"{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}\n"
+            "```\n"
+        )
+
+    def add_message(self, role: str, text: str, role_class: str, bubble_class: str = "bubble") -> None:
         chat = self.query_one("#chat", VerticalScroll)
         chat.mount(Static(self.role_label(role), classes=f"role {role_class}"))
-        chat.mount(Markdown(text, classes="bubble"))
+        chat.mount(Markdown(text, classes=bubble_class))
         self.schedule_scroll_end()
 
     def write_metrics(self, text: str, elapsed: float) -> None:
@@ -707,6 +1103,11 @@ class DeepSeekTui(App[None]):
         self.loading = False
         self.set_assistant_role_loading(False)
 
+    def set_loader_prefix(self, prefix: str) -> None:
+        self.loading_prefix = prefix
+        if self.loading:
+            self.update_loader()
+
     @work
     async def run_loader(self) -> None:
         while self.loading:
@@ -722,7 +1123,8 @@ class DeepSeekTui(App[None]):
         if self.current_stream_role is None:
             return
         suffix = f" {frame}" if loading and frame else ""
-        self.current_stream_role.update(f"{self.role_label('deepseek')}{suffix}")
+        detail = f" {self.loading_prefix}" if loading and self.loading_prefix else ""
+        self.current_stream_role.update(f"{self.role_label('deepseek')}{detail}{suffix}")
 
     def scroll_chat_end(self) -> None:
         self.query_one("#chat", VerticalScroll).scroll_end(animate=False)
@@ -832,7 +1234,7 @@ class DeepSeekTui(App[None]):
 
 def main() -> None:
     log_file = setup_logging()
-    load_dotenv()
+    load_dotenv(project_root() / ".env")
     parser = argparse.ArgumentParser(description="DeepSeek web chat Textual TUI")
     parser.add_argument("--profile", default="default", help="SQLite auth profile. Defaults to default.")
     parser.add_argument("mode", nargs="?", choices=["resume"], help="Resume a saved chat session.")
