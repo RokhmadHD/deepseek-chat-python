@@ -738,6 +738,7 @@ class DeepSeekTui(App[None]):
         self.attached_files: list[UploadedFile] = []
         self.approved_write_dirs: set[str] = set()
         self.tool_activity_events: list[dict[str, Any]] = []
+        self._clipboard_root: Any | None = None
         self.prompt_history = self.load_prompt_history()
         self.prompt_history_index: int | None = None
         self.prompt_history_draft = ""
@@ -787,6 +788,12 @@ class DeepSeekTui(App[None]):
 
     def on_unmount(self) -> None:
         log.info("tui unmount")
+        if self._clipboard_root is not None:
+            try:
+                self._clipboard_root.destroy()
+            except Exception:
+                log.exception("clipboard root destroy failed")
+            self._clipboard_root = None
         self.client.close()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -1278,20 +1285,36 @@ class DeepSeekTui(App[None]):
         return "\n\n".join(lines)
 
     def copy_text_to_clipboard(self, text: str) -> str:
+        clipboard_method = self.copy_to_clipboard(text)
+        if clipboard_method:
+            return clipboard_method
         external_method = self.copy_to_external_clipboard(text)
-        try:
-            super().copy_to_clipboard(text)
-        except Exception:
-            log.exception("textual clipboard copy failed")
         if external_method:
             return external_method
         fallback_path = self.write_clipboard_fallback(text)
         return f"terminal clipboard; fallback file {fallback_path}"
 
+    def copy_to_clipboard(self, text: str) -> str:
+        try:
+            import tkinter as tk
+
+            if self._clipboard_root is None:
+                root = tk.Tk()
+                root.withdraw()
+                self._clipboard_root = root
+            root = self._clipboard_root
+            root.clipboard_clear()
+            root.clipboard_append(text)
+            root.update_idletasks()
+            root.update()
+            return "tk clipboard"
+        except Exception:
+            log.exception("tk clipboard copy failed")
+        return ""
+
     def copy_to_external_clipboard(self, text: str) -> str | None:
         commands = [
             ("wl-copy", ["wl-copy"]),
-            ("xclip", ["xclip", "-selection", "clipboard"]),
             ("xsel", ["xsel", "--clipboard", "--input"]),
             ("pbcopy", ["pbcopy"]),
             ("termux-clipboard-set", ["termux-clipboard-set"]),
