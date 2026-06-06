@@ -88,6 +88,12 @@ One-shot command:
 deepseek-chat "hello"
 ```
 
+Check whether the current profile is logged in:
+
+```bash
+deepseek-chat status
+```
+
 Interactive mode:
 
 ```bash
