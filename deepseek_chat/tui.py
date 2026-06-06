@@ -19,7 +19,7 @@ from textual import events, work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Input, Label, ListItem, ListView, Markdown, Static
+from textual.widgets import Input, Label, ListItem, ListView, Markdown, Static, TextArea
 
 from .client import DeepSeekClient, UploadedFile
 from .logging_config import get_logger, project_root, setup_logging
@@ -216,6 +216,28 @@ class PromptInput(Input):
             self.cursor_position = len(text)
         except Exception:
             pass
+
+
+class CopyableTextArea(TextArea):
+    def __init__(self, text: str, *, id: str) -> None:
+        super().__init__(text=text, id=id, read_only=True)
+
+    def on_mouse_up(self, event: events.MouseUp) -> None:
+        try:
+            super().on_mouse_up(event)
+        except Exception:
+            log.exception("text area mouse up failed")
+        self._copy_selection_or_all()
+
+    def _copy_selection_or_all(self) -> None:
+        selection = getattr(self, "selection", None)
+        if selection is not None and not getattr(selection, "is_empty", True):
+            copier = getattr(self, "action_copy", None)
+            if callable(copier):
+                try:
+                    copier()
+                except Exception:
+                    log.exception("text area selection copy failed")
 
 
 class WriteFileApprovalScreen(ModalScreen[str | None]):
@@ -603,11 +625,13 @@ class DeepSeekTui(App[None]):
     }
 
     #tool-activity {
-        height: auto;
+        height: 1fr;
         max-height: 18;
         margin-top: 1;
         color: $text-muted;
         text-opacity: 65%;
+        border: none;
+        background: $surface;
     }
 
     #composer {
@@ -723,7 +747,7 @@ class DeepSeekTui(App[None]):
             yield VerticalScroll(id="chat")
             with Vertical(id="stats"):
                 yield Static(self.stats_text(), id="stats-info")
-                yield Static(self.tool_activity_text(), id="tool-activity")
+                yield CopyableTextArea(self.tool_activity_text(), id="tool-activity")
                 yield Static("", classes="spacing")                # Pendorong Tengah (1fr)
                 # yield Static(self.commands_text(), id="stats-cmds")
         with Vertical(id="composer"):
@@ -1359,11 +1383,12 @@ class DeepSeekTui(App[None]):
         self.query_one("#stats-info", Static).update(self.stats_text())
 
     def update_tool_activity(self) -> None:
-        self.query_one("#tool-activity", Static).update(self.tool_activity_text())
+        tool_activity = self.query_one("#tool-activity", CopyableTextArea)
+        tool_activity.text = self.tool_activity_text()
 
     def set_stats_visibility(self, width: int) -> None:
         stats = self.query_one("#stats-info", Static)
-        tool_activity = self.query_one("#tool-activity", Static)
+        tool_activity = self.query_one("#tool-activity", CopyableTextArea)
         if width < 90:
             stats.add_class("hidden")
             tool_activity.add_class("hidden")
