@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -41,7 +40,7 @@ class ChatSessionRecord:
 
 
 def project_root() -> Path:
-    return Path(os.getenv("TOOL_WORKSPACE_ROOT", Path.cwd())).resolve()
+    return Path(__file__).resolve().parents[1]
 
 
 def default_db_path() -> Path:

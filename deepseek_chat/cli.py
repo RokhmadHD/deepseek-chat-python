@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from .logging_config import get_logger, project_root, setup_logging
 from .session_store import load_session
@@ -51,6 +52,7 @@ def load_environment() -> None:
         from dotenv import load_dotenv
     except ModuleNotFoundError:
         return
+    load_dotenv(Path.cwd() / ".env")
     load_dotenv(project_root() / ".env")
 
 

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import os
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
 def project_root() -> Path:
-    return Path(os.getenv("TOOL_WORKSPACE_ROOT", Path.cwd())).resolve()
+    return Path(__file__).resolve().parents[1]
 
 
 def log_path() -> Path:

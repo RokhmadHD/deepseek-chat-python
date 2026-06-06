@@ -132,7 +132,7 @@ def compact_text(text: str, limit: int) -> str:
 
 
 def workspace_root_path() -> Path:
-    return Path(os.getenv("TOOL_WORKSPACE_ROOT", str(project_root()))).resolve()
+    return Path(os.getenv("TOOL_WORKSPACE_ROOT", str(Path.cwd()))).resolve()
 
 
 def resolve_workspace_path(path: str) -> Path:
