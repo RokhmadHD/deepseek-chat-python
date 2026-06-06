@@ -1,3 +1,4 @@
+from .code import edit_file, search_symbols
 from .command import run_command
 from .context import project_overview
 from .filesystem import list_dir, read_file, search_files, tree_dir, write_file
@@ -15,6 +16,7 @@ __all__ = [
     "git_diff",
     "git_log",
     "git_status",
+    "edit_file",
     "json_validate",
     "list_dir",
     "multi_search",
@@ -22,6 +24,7 @@ __all__ = [
     "read_file",
     "run_command",
     "search_files",
+    "search_symbols",
     "search_web",
     "write_file",
     "tree_dir",

@@ -48,6 +48,7 @@ COMMANDS = [
     ("/copy user", "copy last user message"),
     ("/exit", "quit"),
     ("/files", "list files"),
+    ("/help", "show help"),
     ("/model", "toggle model"),
     ("/model default", "default model"),
     ("/model expert", "expert model"),
@@ -300,6 +301,63 @@ class WriteFileApprovalScreen(ModalScreen[str | None]):
             self.dismiss("deny")
 
 
+class HelpScreen(ModalScreen[None]):
+    CSS = """
+    Screen {
+        align: center middle;
+    }
+
+    #help-shell {
+        width: 76;
+        height: auto;
+        max-height: 34;
+        border: solid $secondary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #help-body {
+        height: auto;
+        color: $text-muted;
+        text-opacity: 80%;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "close", "Close"),
+        ("q", "close", "Close"),
+        ("f1", "close", "Close"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        body = (
+            "DeepSeek TUI Help\n"
+            "Esc/q closes this panel.\n\n"
+            "Keys\n"
+            "  Enter        send message\n"
+            "  Up/Down      browse user prompt history\n"
+            "  Ctrl+L       clear chat view\n"
+            "  Ctrl+C       quit\n"
+            "  F1           open or close help\n\n"
+            "Commands\n"
+            "  /help        open this help panel\n"
+            "  /copy        copy last assistant reply\n"
+            "  /copy all    copy visible transcript\n"
+            "  /copy user   copy last user message\n"
+            "  /copy raw    export raw transcript to .logs\n"
+            "  /attach path upload a file\n"
+            "  /files       list attached files\n"
+            "  /clear-files clear attached files\n"
+            "  /model       toggle model type\n"
+            "  /quit        quit"
+        )
+        with Vertical(id="help-shell"):
+            yield Static(body, id="help-body")
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class ChatSessionPicker(App[ChatSessionRecord | None]):
     CSS = """
     Screen {
@@ -539,6 +597,7 @@ class DeepSeekTui(App[None]):
     BINDINGS = [
         ("ctrl+c", "quit", "Quit"),
         ("ctrl+l", "clear_chat", "Clear"),
+        ("f1", "show_help", "Help"),
     ]
 
     def __init__(self, profile: str = "default", resume_session: ChatSessionRecord | None = None) -> None:
@@ -586,7 +645,7 @@ class DeepSeekTui(App[None]):
                 yield Static("", classes="spacing")                # Pendorong Tengah (1fr)
                 # yield Static(self.commands_text(), id="stats-cmds")
         with Vertical(id="composer"):
-            yield PromptInput(placeholder="Type message, /attach path, /files, /model, /quit", id="prompt", max_length=2000000)
+            yield PromptInput(placeholder="Type message, /help, /attach path, /files, /model, /quit", id="prompt", max_length=2000000)
             yield Static(self.input_info_text(), id="input-info")
 
     def on_mount(self) -> None:
@@ -605,7 +664,7 @@ class DeepSeekTui(App[None]):
         chat = self.query_one("#chat", VerticalScroll)
         ascii_art = Static(render_welcome(random_logo, chat.size.width), markup=True, classes="bubble", id="welcome")
         chat.mount(ascii_art)
-        self.write_system("Type a message and press Enter. Use /model to switch model_type.")
+        self.write_system("Type a message and press Enter. Use /help for commands.")
 
     def on_click(self) -> None:
         self.query_one("#prompt", PromptInput).focus()
@@ -640,6 +699,13 @@ class DeepSeekTui(App[None]):
             else:
                 prompt_input.value = ""
             self.exit()
+            return
+        if prompt == "/help":
+            if isinstance(prompt_input, PromptInput):
+                prompt_input.clear_prompt()
+            else:
+                prompt_input.value = ""
+            self.action_show_help()
             return
         if prompt == "/files":
             if isinstance(prompt_input, PromptInput):
@@ -877,6 +943,9 @@ class DeepSeekTui(App[None]):
         self.query_one("#chat", VerticalScroll).remove_children()
         self.reset_stats()
         self.write_system("Chat cleared.")
+
+    def action_show_help(self) -> None:
+        self.push_screen(HelpScreen())
 
     def write_user(self, text: str) -> None:
         self.add_message("you", text, "user-role")

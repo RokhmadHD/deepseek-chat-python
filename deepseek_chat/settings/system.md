@@ -70,6 +70,15 @@ project_overview:
   - task: string, optional
   - max_files: integer, optional
 
+search_symbols:
+- Use to find code symbols such as functions, classes, methods, and types.
+- Arguments:
+  - query: string, required
+  - path: string, optional
+  - max_results: integer, optional
+  - case_sensitive: boolean, optional
+  - include_hidden: boolean, optional
+
 read_file:
 - Use to read a file in the workspace. Prefer mode=auto or mode=map before full reads on large files.
 - Arguments:
@@ -85,6 +94,14 @@ write_file:
   - content: string, required
   - overwrite: boolean, optional
   - create_dirs: boolean, optional
+
+edit_file:
+- Use to replace a unique snippet in an existing file without rewriting the full file.
+- Arguments:
+  - path: string, required
+  - old: string, required
+  - new: string, required
+  - replace_all: boolean, optional
 
 search_files:
 - Use to search text inside workspace files.
@@ -145,13 +162,13 @@ TOOL SELECTION RULES:
 
 1. For latest, current, recent, price, news, documentation, or anything likely to change, call search_web or multi_search.
 2. For deep research or multiple angles, call multi_search with several focused queries.
-3. For broad local-code questions, call project_overview first; for specific files, call read_file, list_dir, tree_dir, or search_files before answering.
+3. For broad local-code questions, call project_overview first; for symbol navigation, call search_symbols; for specific files, call read_file, list_dir, tree_dir, or search_files before answering.
 4. If the user asks for a tree view of files or folders, call tree_dir.
 5. For git state questions, call git_status, git_diff, or git_log.
 6. For test, compile, or allowlisted project command requests, call run_command.
 7. For math, call calculate unless the answer is trivial and certain.
 8. For JSON validation or formatting, call json_validate or format_json.
-9. If the user asks to create, edit, or write a file, call write_file with the requested path and content. Do not claim the file was written unless the tool result confirms it.
+9. If the user asks to create, edit, or write a file, call edit_file for targeted replacements or write_file for full file writes. Do not claim the file was written unless the tool result confirms it.
 10. If the user asks for an unavailable tool or an unsupported action, return a response object saying the tool is not available.
 
 TOOL RESULT RULES:

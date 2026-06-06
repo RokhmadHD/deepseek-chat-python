@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from .code import edit_file, search_symbols
 from .command import run_command
 from .context import project_overview
 from .filesystem import list_dir, read_file, search_files, tree_dir, write_file
@@ -70,6 +71,22 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "search_symbols",
+        "description": "Find code symbols such as functions, classes, and types in workspace files.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "path": {"type": "string", "default": "."},
+                "max_results": {"type": "integer", "default": 50},
+                "case_sensitive": {"type": "boolean", "default": False},
+                "include_hidden": {"type": "boolean", "default": False},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "read_file",
         "description": "Read a UTF-8 text file inside the workspace with optional context-saving modes.",
         "parameters": {
@@ -99,6 +116,21 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "create_dirs": { "type": "boolean", "default": False },
             },
             "required": ["path", "content"],
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": "edit_file",
+        "description": "Replace a unique text snippet in a workspace file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "old": {"type": "string"},
+                "new": {"type": "string"},
+                "replace_all": {"type": "boolean", "default": False},
+            },
+            "required": ["path", "old", "new"],
             "additionalProperties": False,
         },
     },
@@ -224,7 +256,9 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "multi_search": multi_search,
     "list_dir": list_dir,
     "project_overview": project_overview,
+    "search_symbols": search_symbols,
     "read_file": read_file,
+    "edit_file": edit_file,
     "write_file": write_file,
     "tree_dir": tree_dir,
     "search_files": search_files,

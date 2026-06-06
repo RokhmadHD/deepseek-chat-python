@@ -268,7 +268,17 @@ class DeepSeekClient:
         log.info("create_session status=%s", response.status_code)
         response.raise_for_status()
         data = response.json()
-        session = data.get("data", {}).get("biz_data", {}).get("chat_session", {})
+        if not isinstance(data, dict):
+            raise RuntimeError(f"DeepSeek returned invalid chat session payload: {data!r}")
+        payload = data.get("data")
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"DeepSeek returned invalid chat session payload: {data!r}")
+        biz_data = payload.get("biz_data")
+        if not isinstance(biz_data, dict):
+            raise RuntimeError(f"DeepSeek returned invalid chat session payload: {data!r}")
+        session = biz_data.get("chat_session")
+        if not isinstance(session, dict):
+            raise RuntimeError(f"DeepSeek returned invalid chat session payload: {data!r}")
         session_id = session.get("id")
         if not session_id:
             raise RuntimeError(f"DeepSeek returned no chat session: {data}")

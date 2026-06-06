@@ -38,6 +38,14 @@ cp .env.example .env
 
 `.env` is only for non-secret configuration. Login tokens and cookies are stored in SQLite.
 
+If you want the commands available globally without activating a virtualenv, run:
+
+```bash
+bash install.sh
+```
+
+That installs the package with `pipx` when available, or falls back to `python3 -m pip install --user .`.
+
 Login:
 
 ```bash
