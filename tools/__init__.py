@@ -1,4 +1,5 @@
 from .command import run_command
+from .context import project_overview
 from .filesystem import list_dir, read_file, search_files, tree_dir, write_file
 from .project import git_diff, git_log, git_status
 from .registry import TOOL_SCHEMAS, execute_tool
@@ -17,6 +18,7 @@ __all__ = [
     "json_validate",
     "list_dir",
     "multi_search",
+    "project_overview",
     "read_file",
     "run_command",
     "search_files",

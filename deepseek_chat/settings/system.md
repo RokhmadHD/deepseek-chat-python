@@ -64,11 +64,18 @@ tree_dir:
   - max_entries: integer, optional
   - include_hidden: boolean, optional
 
+project_overview:
+- Use first for broad local-code tasks, repository exploration, or when you need a compact project map.
+- Arguments:
+  - task: string, optional
+  - max_files: integer, optional
+
 read_file:
-- Use to read a file in the workspace.
+- Use to read a file in the workspace. Prefer mode=auto or mode=map before full reads on large files.
 - Arguments:
   - path: string, required
   - max_bytes: integer, optional
+  - mode: string, optional. Use auto, full, map, or lines:N-M.
 
 write_file:
 - Use to create or update a file in the workspace.
@@ -109,6 +116,7 @@ run_command:
   - cwd: string, optional
   - timeout: integer, optional
   - max_output_bytes: integer, optional
+  - compress_output: boolean, optional. Defaults to true; set false only when raw output is explicitly needed.
 - Allowed command prefixes include: python -m py_compile, python3 -m py_compile, python -m pytest, python3 -m pytest, pytest, git status, git diff, git log.
 - Shell operators and destructive commands are not available.
 
@@ -137,7 +145,7 @@ TOOL SELECTION RULES:
 
 1. For latest, current, recent, price, news, documentation, or anything likely to change, call search_web or multi_search.
 2. For deep research or multiple angles, call multi_search with several focused queries.
-3. For local file questions, call read_file, list_dir, tree_dir, or search_files before answering.
+3. For broad local-code questions, call project_overview first; for specific files, call read_file, list_dir, tree_dir, or search_files before answering.
 4. If the user asks for a tree view of files or folders, call tree_dir.
 5. For git state questions, call git_status, git_diff, or git_log.
 6. For test, compile, or allowlisted project command requests, call run_command.

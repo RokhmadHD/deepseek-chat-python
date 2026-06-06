@@ -123,9 +123,23 @@ def parse_tool_message(text: str) -> dict[str, Any] | None:
     stripped = strip_code_fence(text.strip())
     if not stripped:
         return None
-    try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError:
+    parse_candidates = [stripped]
+    compact = stripped.lstrip()
+    if compact.startswith('"type"'):
+        wrapped = stripped
+        if not compact.startswith("{"):
+            wrapped = "{" + wrapped
+        if not wrapped.rstrip().endswith("}"):
+            wrapped += "}"
+        parse_candidates.append(wrapped)
+    parsed: Any = None
+    for candidate in parse_candidates:
+        try:
+            parsed = json.loads(candidate)
+            break
+        except json.JSONDecodeError:
+            continue
+    if parsed is None:
         start = stripped.find("{")
         end = stripped.rfind("}")
         if start < 0 or end <= start:

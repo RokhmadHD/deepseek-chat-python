@@ -990,7 +990,7 @@ class DeepSeekTui(App[None]):
             "title": self.session_title,
             "created_at": self.session_created_at,
             "exported_at": datetime.now().isoformat(),
-            "messages": self.chat_messages,
+            "messages": self.export_messages(),
             "stats": self.session_stats_payload(),
         }
         return (
@@ -999,6 +999,15 @@ class DeepSeekTui(App[None]):
             f"{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}\n"
             "```\n"
         )
+
+    def export_messages(self) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = []
+        for message in self.chat_messages:
+            role = str(message.get("role") or "")
+            text = str(message.get("text") or "")
+            if role and text:
+                messages.append({"role": role, "text": text})
+        return messages
 
     def add_message(self, role: str, text: str, role_class: str, bubble_class: str = "bubble") -> None:
         chat = self.query_one("#chat", VerticalScroll)

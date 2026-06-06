@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,10 @@ DEFAULT_MAX_READ_BYTES = 200_000
 DEFAULT_MAX_ENTRIES = 200
 DEFAULT_MAX_SEARCH_RESULTS = 100
 DEFAULT_TREE_DEPTH = 3
+AUTO_MAP_THRESHOLD_BYTES = 80_000
+MAP_LINE_RE = re.compile(
+    r"^(\s*)(class|def|async def|from|import)\s+([A-Za-z_][A-Za-z0-9_\.]*|[A-Za-z_][A-Za-z0-9_]*\s+import\b|[A-Za-z_][A-Za-z0-9_]*\b)"
+)
 
 
 def list_dir(path: str = ".", *, max_entries: int = DEFAULT_MAX_ENTRIES) -> dict[str, Any]:
@@ -82,21 +87,86 @@ def tree_dir(
     }
 
 
-def read_file(path: str, *, max_bytes: int = DEFAULT_MAX_READ_BYTES) -> dict[str, Any]:
+def read_file(path: str, *, max_bytes: int = DEFAULT_MAX_READ_BYTES, mode: str = "auto") -> dict[str, Any]:
     target = resolve_workspace_path(path)
     if not target.is_file():
         raise ValueError(f"path is not a file: {path}")
 
     limit = clamp_int(max_bytes, minimum=1, maximum=2_000_000)
     data = target.read_bytes()
-    truncated = len(data) > limit
-    text = data[:limit].decode("utf-8", errors="replace")
+    selected_mode = normalize_read_mode(mode, len(data))
+    text = data.decode("utf-8", errors="replace")
+    if selected_mode.startswith("lines:"):
+        content, truncated = read_line_range(text, selected_mode, limit)
+    elif selected_mode == "map":
+        content, truncated = read_map(text, limit)
+    else:
+        truncated = len(data) > limit
+        content = data[:limit].decode("utf-8", errors="replace")
     return {
         "path": relative_path(target),
         "bytes": len(data),
+        "mode": selected_mode,
         "truncated": truncated,
-        "content": text,
+        "content": content,
     }
+
+
+def normalize_read_mode(mode: str, byte_count: int) -> str:
+    normalized = (mode or "auto").strip().lower()
+    if normalized == "auto":
+        return "map" if byte_count > AUTO_MAP_THRESHOLD_BYTES else "full"
+    if normalized in {"full", "map"} or normalized.startswith("lines:"):
+        return normalized
+    raise ValueError("mode must be one of: auto, full, map, lines:N-M")
+
+
+def read_line_range(text: str, mode: str, max_bytes: int) -> tuple[str, bool]:
+    raw_range = mode.removeprefix("lines:")
+    if "-" not in raw_range:
+        raise ValueError("line mode must use lines:N-M")
+    start_raw, end_raw = raw_range.split("-", 1)
+    start = clamp_int(int(start_raw), minimum=1, maximum=10_000_000)
+    end = clamp_int(int(end_raw), minimum=start, maximum=10_000_000)
+    lines = text.splitlines()
+    selected = lines[start - 1 : end]
+    numbered = "\n".join(f"{line_no:4}| {line}" for line_no, line in enumerate(selected, start=start))
+    return clamp_content(numbered, max_bytes)
+
+
+def read_map(text: str, max_bytes: int) -> tuple[str, bool]:
+    lines = text.splitlines()
+    mapped: list[str] = []
+    skipped = 0
+    for line_no, line in enumerate(lines, start=1):
+        stripped = line.strip()
+        match = MAP_LINE_RE.match(line)
+        if match:
+            mapped.append(f"{line_no:4}| {line}")
+            skipped = 0
+            continue
+        if stripped.startswith(("#", "@")):
+            mapped.append(f"{line_no:4}| {line}")
+            skipped = 0
+            continue
+        if not stripped:
+            skipped += 1
+            continue
+        if skipped == 0 and mapped:
+            mapped.append("     ...")
+        skipped += 1
+    if not mapped:
+        mapped = lines[:80]
+    return clamp_content("\n".join(mapped), max_bytes)
+
+
+def clamp_content(text: str, max_bytes: int) -> tuple[str, bool]:
+    limit = clamp_int(max_bytes, minimum=1, maximum=2_000_000)
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text, False
+    truncated = encoded[: max(0, limit - 32)].decode("utf-8", errors="ignore")
+    return truncated + "...[truncated]", True
 
 
 def write_file(

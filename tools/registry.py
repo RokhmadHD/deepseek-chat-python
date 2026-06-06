@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .command import run_command
+from .context import project_overview
 from .filesystem import list_dir, read_file, search_files, tree_dir, write_file
 from .project import git_diff, git_log, git_status
 from .searxng import multi_search, search_web
@@ -57,13 +58,30 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "project_overview",
+        "description": "Return a compact project map with a tree and task-relevant files.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {"type": "string", "default": ""},
+                "max_files": {"type": "integer", "default": 16},
+            },
+            "additionalProperties": False,
+        },
+    },
+    {
         "name": "read_file",
-        "description": "Read a UTF-8 text file inside the workspace.",
+        "description": "Read a UTF-8 text file inside the workspace with optional context-saving modes.",
         "parameters": {
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
                 "max_bytes": {"type": "integer", "default": 200000},
+                "mode": {
+                    "type": "string",
+                    "default": "auto",
+                    "description": "auto, full, map, or lines:N-M.",
+                },
             },
             "required": ["path"],
             "additionalProperties": False,
@@ -154,6 +172,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                 "cwd": {"type": "string", "default": "."},
                 "timeout": {"type": "integer", "default": 30},
                 "max_output_bytes": {"type": "integer", "default": 120000},
+                "compress_output": {"type": "boolean", "default": True},
             },
             "required": ["command"],
             "additionalProperties": False,
@@ -204,6 +223,7 @@ TOOL_HANDLERS: dict[str, ToolHandler] = {
     "search_web": search_web,
     "multi_search": multi_search,
     "list_dir": list_dir,
+    "project_overview": project_overview,
     "read_file": read_file,
     "write_file": write_file,
     "tree_dir": tree_dir,

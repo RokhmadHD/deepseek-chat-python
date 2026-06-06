@@ -8,6 +8,20 @@ from .filesystem import resolve_workspace_path, workspace_root
 
 DEFAULT_TIMEOUT_SECONDS = 30
 DEFAULT_MAX_OUTPUT_BYTES = 120_000
+MAX_UNCOMPRESSED_LINES = 160
+IMPORTANT_LINE_MARKERS = (
+    "error",
+    "failed",
+    "failure",
+    "traceback",
+    "exception",
+    "warning",
+    "assert",
+    "passed",
+    "collected",
+    "short test summary",
+    "syntaxerror",
+)
 
 ALLOWED_EXACT_PREFIXES = (
     ("python", "-m", "py_compile"),
@@ -46,6 +60,7 @@ def run_command(
     cwd: str = ".",
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
+    compress_output: bool = True,
 ) -> dict[str, Any]:
     args = parse_command(command)
     validate_command(args)
@@ -61,8 +76,8 @@ def run_command(
         timeout=max(1, min(int(timeout), 120)),
         check=False,
     )
-    stdout, stdout_truncated = truncate_text(completed.stdout, max_output_bytes)
-    stderr, stderr_truncated = truncate_text(completed.stderr, max_output_bytes)
+    stdout, stdout_truncated, stdout_compressed = prepare_output(completed.stdout, max_output_bytes, compress_output)
+    stderr, stderr_truncated, stderr_compressed = prepare_output(completed.stderr, max_output_bytes, compress_output)
     return {
         "command": args,
         "cwd": str(workdir.relative_to(workspace_root())),
@@ -71,6 +86,8 @@ def run_command(
         "stderr": stderr,
         "stdout_truncated": stdout_truncated,
         "stderr_truncated": stderr_truncated,
+        "stdout_compressed": stdout_compressed,
+        "stderr_compressed": stderr_compressed,
     }
 
 
@@ -90,6 +107,42 @@ def validate_command(args: list[str]) -> None:
     if not any(tuple(args[: len(prefix)]) == prefix for prefix in ALLOWED_EXACT_PREFIXES):
         allowed = ", ".join(" ".join(prefix) for prefix in ALLOWED_EXACT_PREFIXES)
         raise ValueError(f"command is not allowed. Allowed prefixes: {allowed}")
+
+
+def prepare_output(text: str, max_bytes: int, compress_output: bool) -> tuple[str, bool, bool]:
+    compressed = False
+    if compress_output:
+        text, compressed = compress_text(text)
+    text, truncated = truncate_text(text, max_bytes)
+    return text, truncated, compressed
+
+
+def compress_text(text: str) -> tuple[str, bool]:
+    lines = text.splitlines()
+    if len(lines) <= MAX_UNCOMPRESSED_LINES:
+        return text, False
+
+    important = []
+    seen_indexes = set()
+    for index, line in enumerate(lines):
+        lowered = line.lower()
+        if any(marker in lowered for marker in IMPORTANT_LINE_MARKERS):
+            important.append((index, line))
+            seen_indexes.add(index)
+        if len(important) >= 80:
+            break
+
+    selected: list[str] = []
+    selected.extend(lines[:40])
+    if important:
+        selected.append(f"...[{len(lines) - 80} middle lines compressed; important lines below]...")
+        for index, line in important:
+            selected.append(f"{index + 1}: {line}")
+    else:
+        selected.append(f"...[{len(lines) - 80} middle lines compressed]...")
+    tail_start = max(40, len(lines) - 40)
+    selected.extend(line for index, line in enumerate(lines[tail_start:], start=tail_start) if index not in seen_indexes)
+    return "\n".join(selected), True
 
 
 def truncate_text(text: str, max_bytes: int) -> tuple[str, bool]:
