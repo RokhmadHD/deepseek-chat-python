@@ -204,10 +204,7 @@ def normalize_assistant_text(text: str) -> str:
     message = parse_tool_message(text)
     if not message:
         return text
-    message_type = message.get("type")
-    if message_type == "tool_call":
-        return ""
-    if message_type != "response":
+    if message.get("type") != "response":
         return text
     content = message.get("content")
     return content if isinstance(content, str) else string_value(content)
