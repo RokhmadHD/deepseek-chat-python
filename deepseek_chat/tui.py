@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import random
 
 from dotenv import load_dotenv
 from textual import events, work
@@ -52,7 +53,8 @@ COMMANDS = [
     ("/quit", "quit"),
 ]
 
-welcome = f"""⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⡀⠀⠀⠀⠀⠀⠀⢀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
+
+LOGOS = (r"""
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠄⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠃⠀⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣤⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
@@ -77,15 +79,46 @@ welcome = f"""⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣷⠀⠀⠀⠀⠻⠹⠛⠟⠻⠙⠿⠿⠊⠅⠀⠀⠀⠀⠀⡜⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢸⣆⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣼⡁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠛⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣾⡿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-[bold cyan]                             ╭{'─' * 25}╮  
-[bold cyan]    ▓█████▄ ▓█████ ▓█████  ██▓███    ██████ ▓█████ ▓█████  ██ ▄█▀
-[bold cyan]    ▒██▀ ██▌▓█   ▀ ▓█   ▀ ▓██░  ██▒▒██    ▒ ▓█   ▀ ▓█   ▀  ██▄█▒
-[bold cyan]    ░██   █▌▒███   ▒███   ▓██░ ██▓▒░ ▓██▄   ▒███   ▒███   ▓███▄░
-[bold cyan]    ░▓█▄   ▌▒▓█  ▄ ▒▓█  ▄ ▒██▄█▓▒ ▒  ▒   ██▒▒▓█  ▄ ▒▓█  ▄ ▓██ █▄
-[bold cyan]    ░▒████▓ ░▒████▒░▒████▒▒██▒ ░  ░▒██████▒▒░▒████▒░▒████▒▒██▒ █▄
-[bold cyan]    ╚═══▀  ░░ ▒░ ░░░ ▒░ ░▒▓▒░ ░  ░▒ ▒▓▒ ▒ ░░░ ▒░ ░░░ ▒░ ░▒ ▒▒ ▓▒
-[bold cyan]            ╰{'─' * 30}╯
-"""
+
+""")
+
+
+BRAND_BANNER = (
+    f"                             ╭{'─' * 25}╮  ",
+    "    ▓█████▄ ▓█████ ▓█████  ██▓███    ██████ ▓█████ ▓█████  ██ ▄██▀",
+    "    ▒██▀ ██▌▓█   ▀ ▓█   ▀ ▓██░  ██▒▒██    ▒ ▓█   ▀ ▓█   ▀  ██▄██▒",
+    "    ░██   █▌▒███   ▒███   ▓██░ ██▓▒░ ▓██▄   ▒███   ▒███   ▓████░",
+    "    ░▓█▄   ▌▒▓█  ▄ ▒▓█  ▄ ▒██▄█▓▒ ▒  ▒   ██▒▒▓█  ▄ ▒▓█  ▄ ▓██ ██▄",
+    "    ░▒████▓ ░▒████▒░▒████▒▒██▒ ░  ░▒██████▒▒░▒████▒░▒████▒▒██▒ ██▄",
+    "    ╚═══▀  ░░ ▒░ ░░░ ▒░ ░▒▓▒░ ░  ░▒ ▒▓▒ ▒ ░░░ ▒░ ░░░ ▒░ ░▒ ▒▒  ▒▓░▀",
+    f"            ╰{'─' * 30}╯",
+)
+COMPACT_BANNER = (
+    f"╭{'─' * 25}╮",
+    f"│{'DEEPSEEK-TUI':^25}│",
+    f"╰{'─' * 25}╯",
+)
+
+
+def center_lines(lines: list[str], width: int) -> list[str]:
+    return [line.center(width).rstrip() for line in lines]
+
+
+def render_welcome(logo: str, target_width: int | None = None) -> str:
+    logo_lines = logo.strip("\n").splitlines()
+    banner_lines = list(BRAND_BANNER)
+    content_width = max(len(line) for line in [*logo_lines, *banner_lines])
+    if target_width and target_width < content_width:
+        content_width = max(len(line) for line in COMPACT_BANNER)
+        logo_lines = []
+        banner_lines = list(COMPACT_BANNER)
+    width = max(content_width, target_width or 0)
+    centered = center_lines(logo_lines + banner_lines, width)
+    body = "\n".join(centered)
+    return f"[bold cyan]{body}[/]"
+
+
+random_logo = LOGOS
 
 
 def compact_text(text: str, limit: int) -> str:
@@ -516,7 +549,7 @@ class DeepSeekTui(App[None]):
             with Vertical(id="stats"):
                 yield Static(self.stats_text(), id="stats-info")
                 yield Static("", classes="spacing")                # Pendorong Tengah (1fr)
-                yield Static(self.commands_text(), id="stats-cmds")
+                # yield Static(self.commands_text(), id="stats-cmds")
         with Vertical(id="composer"):
             yield PromptInput(placeholder="Type message, /attach path, /files, /model, /quit", id="prompt", max_length=2000000)
             yield Static(self.input_info_text(), id="input-info")
@@ -534,8 +567,9 @@ class DeepSeekTui(App[None]):
         if self.session_record:
             self.render_chat_history()
             self.write_system(f"Resumed session: {self.session_label()}")
-        ascii_art = Static(welcome, markup=True, classes="bubble")
-        self.query_one("#chat", VerticalScroll).mount(ascii_art)
+        chat = self.query_one("#chat", VerticalScroll)
+        ascii_art = Static(render_welcome(random_logo, chat.size.width), markup=True, classes="bubble", id="welcome")
+        chat.mount(ascii_art)
         self.write_system("Type a message and press Enter. Use /model to switch model_type.")
 
     def on_click(self) -> None:
@@ -545,6 +579,11 @@ class DeepSeekTui(App[None]):
         size = getattr(event, "size", None)
         width = getattr(size, "width", self.size.width)
         self.set_stats_visibility(width)
+        try:
+            chat_width = self.query_one("#chat", VerticalScroll).size.width
+            self.query_one("#welcome", Static).update(render_welcome(random_logo, chat_width))
+        except Exception:
+            pass
 
     def on_unmount(self) -> None:
         log.info("tui unmount")
