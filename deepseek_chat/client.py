@@ -156,15 +156,48 @@ def parse_tool_message(text: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             continue
     if parsed is None:
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start < 0 or end <= start:
+        candidate = extract_json_object(stripped)
+        if candidate is None:
             return None
         try:
-            parsed = json.loads(stripped[start : end + 1])
+            parsed = json.loads(candidate)
         except json.JSONDecodeError:
             return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def extract_json_object(text: str) -> str | None:
+    start = text.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            depth += 1
+            continue
+        if char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+            if depth < 0:
+                return None
+    return None
 
 
 def normalize_assistant_text(text: str) -> str:
