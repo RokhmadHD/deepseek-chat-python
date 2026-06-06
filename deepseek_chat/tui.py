@@ -24,6 +24,7 @@ from textual.widgets import Input, Label, ListItem, ListView, Markdown, Static
 from .client import DeepSeekClient, UploadedFile
 from .logging_config import get_logger, project_root, setup_logging
 from .session_store import ChatSessionRecord, list_chat_sessions, save_chat_session
+from tools.command import command_requires_approval
 
 log = get_logger("tui")
 
@@ -297,6 +298,87 @@ class WriteFileApprovalScreen(ModalScreen[str | None]):
             self.dismiss("approve_once")
         elif selected_id == "approve-dir":
             self.dismiss("approve_dir")
+        elif selected_id == "deny":
+            self.dismiss("deny")
+
+
+class RunCommandApprovalScreen(ModalScreen[str | None]):
+    CSS = """
+    Screen {
+        align: center middle;
+    }
+
+    #approval-shell {
+        width: 82;
+        height: auto;
+        border: solid $secondary;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #approval-body {
+        height: auto;
+        color: $text-muted;
+        text-opacity: 75%;
+    }
+
+    #approval-list {
+        height: auto;
+        max-height: 6;
+        margin-top: 1;
+        border: none;
+        background: $surface;
+        color: $text-muted 70%;
+    }
+
+    ListItem {
+        padding: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        ("escape", "deny", "Deny"),
+        ("q", "deny", "Deny"),
+    ]
+
+    def __init__(self, command: str, cwd: str, timeout: int, max_output_bytes: int, compress_output: bool) -> None:
+        super().__init__()
+        self.command = command
+        self.cwd = cwd
+        self.timeout = timeout
+        self.max_output_bytes = max_output_bytes
+        self.compress_output = compress_output
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="approval-shell"):
+            body = (
+                "Approve run_command request\n"
+                "Use Up/Down and Enter. Esc or q denies.\n\n"
+                f"Command: {self.command}\n"
+                f"Cwd: {self.cwd}\n"
+                f"Timeout: {self.timeout}s\n"
+                f"Max output: {self.max_output_bytes} bytes\n"
+                f"Compress output: {'yes' if self.compress_output else 'no'}"
+            )
+            yield Static(body, id="approval-body")
+            yield ListView(
+                ListItem(Label("Approve once"), id="approve-once"),
+                ListItem(Label("Deny"), id="deny"),
+                id="approval-list",
+            )
+
+    def on_mount(self) -> None:
+        approval_list = self.query_one("#approval-list", ListView)
+        approval_list.index = 0
+        approval_list.focus()
+
+    def action_deny(self) -> None:
+        self.dismiss("deny")
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        selected_id = event.item.id or ""
+        if selected_id == "approve-once":
+            self.dismiss("approve_once")
         elif selected_id == "deny":
             self.dismiss("deny")
 
@@ -985,6 +1067,35 @@ class DeepSeekTui(App[None]):
             self.set_loader_prefix(f"Tool {tool} {status} in {elapsed}")
 
     def request_tool_approval(self, tool_name: str, arguments: dict[str, Any]) -> str:
+        if tool_name == "run_command":
+            command = arguments.get("command")
+            if not command_requires_approval(command):
+                return "approve_once"
+            display_command = shlex.join(command) if isinstance(command, list) else str(command or "")
+            cwd = str(arguments.get("cwd") or ".")
+            timeout = int(arguments.get("timeout", 30))
+            max_output_bytes = int(arguments.get("max_output_bytes", 120000))
+            compress_output = bool(arguments.get("compress_output", True))
+            decision_event = threading.Event()
+            decision_box: dict[str, str] = {}
+
+            def open_dialog() -> None:
+                self.push_screen(
+                    RunCommandApprovalScreen(
+                        command=display_command,
+                        cwd=cwd,
+                        timeout=timeout,
+                        max_output_bytes=max_output_bytes,
+                        compress_output=compress_output,
+                    ),
+                    callback=lambda decision: self.on_run_command_approval(decision, decision_box, decision_event),
+                )
+
+            self.call_from_thread(open_dialog)
+            self.call_from_thread(lambda: self.set_loader_prefix(f"Approve run_command {compact_text(display_command, 28)}"))
+            decision_event.wait()
+            return decision_box.get("decision", "deny")
+
         if tool_name != "write_file":
             return "approve_once"
 
@@ -1033,6 +1144,15 @@ class DeepSeekTui(App[None]):
             self.approved_write_dirs.add(target_dir)
             resolved = "approve_once"
         decision_box["decision"] = resolved
+        decision_event.set()
+
+    def on_run_command_approval(
+        self,
+        decision: str | None,
+        decision_box: dict[str, str],
+        decision_event: threading.Event,
+    ) -> None:
+        decision_box["decision"] = decision or "deny"
         decision_event.set()
 
     def tool_event_text(self, event: dict[str, Any]) -> str:

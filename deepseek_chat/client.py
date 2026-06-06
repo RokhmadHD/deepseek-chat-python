@@ -43,6 +43,21 @@ def execute_registered_tool(name: str, arguments: dict[str, Any]) -> dict[str, A
     return execute_tool(name, arguments)
 
 
+def command_requires_approval(command: str | list[str]) -> bool:
+    try:
+        from tools.command import command_requires_approval as helper
+    except ModuleNotFoundError:
+        project_root = Path(__file__).resolve().parents[1]
+        if str(project_root) not in sys.path:
+            sys.path.insert(0, str(project_root))
+        from tools.command import command_requires_approval as helper
+    try:
+        return helper(command)
+    except Exception:
+        log.exception("failed to classify command approval requirement")
+        return True
+
+
 def read_cookie_header(session: StoredSession | None = None) -> str:
     return session.cookie_header if session else ""
 
@@ -344,7 +359,10 @@ class DeepSeekClient:
             if on_tool_event:
                 on_tool_event(call_event)
             approval_denied = False
-            if tool_name == "write_file":
+            needs_approval = tool_name == "write_file"
+            if tool_name == "run_command":
+                needs_approval = command_requires_approval(arguments.get("command", []))
+            if needs_approval:
                 try:
                     approval = "deny" if on_tool_approval is None else on_tool_approval(tool_name, arguments)
                 except Exception:
@@ -355,7 +373,7 @@ class DeepSeekClient:
             started_at = time.perf_counter()
             try:
                 if approval_denied:
-                    raise PermissionError("write_file denied by user")
+                    raise PermissionError(f"{tool_name} denied by user")
                 result = execute_registered_tool(tool_name, arguments)
                 result_event = {
                     "type": "tool_result",

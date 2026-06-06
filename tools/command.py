@@ -34,6 +34,12 @@ ALLOWED_EXACT_PREFIXES = (
     ("git", "log"),
 )
 
+SHELL_COMMAND_PREFIXES = (
+    ("bash", "-lc"),
+    ("sh", "-lc"),
+    ("zsh", "-lc"),
+)
+
 BLOCKED_TOKENS = {
     "rm",
     "rmdir",
@@ -47,9 +53,6 @@ BLOCKED_TOKENS = {
     "wget",
     "ssh",
     "scp",
-    "bash",
-    "sh",
-    "zsh",
     "fish",
 }
 
@@ -91,6 +94,11 @@ def run_command(
     }
 
 
+def command_requires_approval(command: str | list[str]) -> bool:
+    args = parse_command(command)
+    return any(tuple(args[: len(prefix)]) == prefix for prefix in SHELL_COMMAND_PREFIXES)
+
+
 def parse_command(command: str | list[str]) -> list[str]:
     args = shlex.split(command) if isinstance(command, str) else [str(item) for item in command]
     if not args:
@@ -104,8 +112,9 @@ def validate_command(args: list[str]) -> None:
         raise ValueError(f"command is blocked: {executable}")
     if any(token in {"&&", "||", ";", "|", ">", ">>", "<"} for token in args):
         raise ValueError("shell operators are not allowed")
-    if not any(tuple(args[: len(prefix)]) == prefix for prefix in ALLOWED_EXACT_PREFIXES):
-        allowed = ", ".join(" ".join(prefix) for prefix in ALLOWED_EXACT_PREFIXES)
+    allowed_prefixes = ALLOWED_EXACT_PREFIXES + SHELL_COMMAND_PREFIXES
+    if not any(tuple(args[: len(prefix)]) == prefix for prefix in allowed_prefixes):
+        allowed = ", ".join(" ".join(prefix) for prefix in allowed_prefixes)
         raise ValueError(f"command is not allowed. Allowed prefixes: {allowed}")
 
 
