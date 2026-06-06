@@ -167,6 +167,16 @@ def parse_tool_message(text: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def normalize_assistant_text(text: str) -> str:
+    message = parse_tool_message(text)
+    if not message:
+        return text
+    if message.get("type") != "response":
+        return text
+    content = message.get("content")
+    return content if isinstance(content, str) else string_value(content)
+
+
 def strip_code_fence(text: str) -> str:
     if not text.startswith("```"):
         return text
@@ -601,7 +611,7 @@ class DeepSeekClient:
         response.raise_for_status()
         raw = response.text
         return ChatTurn(
-            text=render_sse_text(raw),
+            text=normalize_assistant_text(render_sse_text(raw)),
             session_id=session_id,
             parent_message_id=extract_message_id(raw) or parent_message_id,
             raw=raw,
