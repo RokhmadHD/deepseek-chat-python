@@ -1315,6 +1315,7 @@ class DeepSeekTui(App[None]):
     def copy_to_external_clipboard(self, text: str) -> str | None:
         commands = [
             ("wl-copy", ["wl-copy"]),
+            ("xclip", ["xclip", "-selection", "clipboard"]),
             ("xsel", ["xsel", "--clipboard", "--input"]),
             ("pbcopy", ["pbcopy"]),
             ("termux-clipboard-set", ["termux-clipboard-set"]),
