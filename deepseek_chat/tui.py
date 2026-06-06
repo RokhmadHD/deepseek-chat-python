@@ -4,7 +4,9 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import shlex
+import subprocess
 import threading
 import time
 from datetime import datetime, timezone
@@ -162,6 +164,18 @@ class PromptInput(Input):
         event.stop()
         event.prevent_default()
 
+    def _on_key(self, event: events.Key) -> None:
+        if event.key == "up":
+            handler = getattr(self.app, "show_prompt_history_previous", None)
+        elif event.key == "down":
+            handler = getattr(self.app, "show_prompt_history_next", None)
+        else:
+            return
+        if callable(handler):
+            handler()
+            event.stop()
+            event.prevent_default()
+
     def action_paste(self) -> None:
         clipboard = self.app.clipboard
         if clipboard:
@@ -192,6 +206,14 @@ class PromptInput(Input):
     def clear_prompt(self) -> None:
         self.value = ""
         self.pasted_fragments.clear()
+
+    def set_prompt_text(self, text: str) -> None:
+        self.value = text
+        self.pasted_fragments.clear()
+        try:
+            self.cursor_position = len(text)
+        except Exception:
+            pass
 
 
 class WriteFileApprovalScreen(ModalScreen[str | None]):
@@ -440,6 +462,14 @@ class DeepSeekTui(App[None]):
         text-opacity: 50%;
     }
 
+    #tool-activity {
+        height: auto;
+        max-height: 18;
+        margin-top: 1;
+        color: $text-muted;
+        text-opacity: 65%;
+    }
+
     #composer {
         height: 4;
         padding: 0;
@@ -542,12 +572,17 @@ class DeepSeekTui(App[None]):
         self.last_estimated_cost = float(session_stats.get("last_estimated_cost", 0.0))
         self.attached_files: list[UploadedFile] = []
         self.approved_write_dirs: set[str] = set()
+        self.tool_activity_events: list[dict[str, Any]] = []
+        self.prompt_history = self.load_prompt_history()
+        self.prompt_history_index: int | None = None
+        self.prompt_history_draft = ""
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="workspace"):
             yield VerticalScroll(id="chat")
             with Vertical(id="stats"):
                 yield Static(self.stats_text(), id="stats-info")
+                yield Static(self.tool_activity_text(), id="tool-activity")
                 yield Static("", classes="spacing")                # Pendorong Tengah (1fr)
                 # yield Static(self.commands_text(), id="stats-cmds")
         with Vertical(id="composer"):
@@ -668,7 +703,10 @@ class DeepSeekTui(App[None]):
             prompt_input.value = ""
         self.write_user(display_prompt)
         self.chat_messages.append({"role": "user", "text": display_prompt})
+        self.append_prompt_history(prompt)
         self.pending_prompt = prompt
+        self.tool_activity_events = []
+        self.update_tool_activity()
         self.busy = True
         self.create_assistant_stream()
         self.start_loader("DeepSeek is replying")
@@ -677,6 +715,59 @@ class DeepSeekTui(App[None]):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self.update_input_info(event.value)
+
+    def load_prompt_history(self) -> list[str]:
+        history: list[str] = []
+        try:
+            sessions = list_chat_sessions(self.profile)
+        except Exception:
+            log.exception("failed to load prompt history")
+            return history
+        for session in reversed(sessions):
+            for message in session.messages:
+                if message.get("role") == "user":
+                    self.append_prompt_history_text(history, str(message.get("text") or ""))
+        return history
+
+    def append_prompt_history(self, prompt: str) -> None:
+        self.append_prompt_history_text(self.prompt_history, prompt)
+        self.prompt_history_index = None
+        self.prompt_history_draft = ""
+
+    def append_prompt_history_text(self, history: list[str], prompt: str) -> None:
+        normalized = prompt.strip()
+        if not normalized or normalized.startswith("/"):
+            return
+        try:
+            history.remove(normalized)
+        except ValueError:
+            pass
+        history.append(normalized)
+
+    def show_prompt_history_previous(self) -> None:
+        if not self.prompt_history:
+            return
+        prompt_input = self.query_one("#prompt", PromptInput)
+        if self.prompt_history_index is None:
+            self.prompt_history_draft = prompt_input.resolved_value()
+            self.prompt_history_index = len(self.prompt_history) - 1
+        elif self.prompt_history_index > 0:
+            self.prompt_history_index -= 1
+        prompt_input.set_prompt_text(self.prompt_history[self.prompt_history_index])
+        self.update_input_info(prompt_input.value)
+
+    def show_prompt_history_next(self) -> None:
+        if self.prompt_history_index is None:
+            return
+        prompt_input = self.query_one("#prompt", PromptInput)
+        if self.prompt_history_index < len(self.prompt_history) - 1:
+            self.prompt_history_index += 1
+            prompt_input.set_prompt_text(self.prompt_history[self.prompt_history_index])
+        else:
+            self.prompt_history_index = None
+            prompt_input.set_prompt_text(self.prompt_history_draft)
+            self.prompt_history_draft = ""
+        self.update_input_info(prompt_input.value)
 
     @work(thread=True)
     def send_prompt(self, prompt: str, ref_file_ids: list[str]) -> None:
@@ -763,8 +854,8 @@ class DeepSeekTui(App[None]):
         self.current_stream_role = None
         self.chat_messages.append({"role": "assistant", "text": text})
         if tool_events:
-            self.write_tool_events(tool_events)
-            self.chat_messages.append({"role": "tool", "text": self.tool_events_text(tool_events), "events": tool_events})
+            self.tool_activity_events = tool_events
+            self.update_tool_activity()
         self.write_metrics(text, elapsed)
         self.schedule_scroll_end(force=True)
         self.persist_chat_session(text)
@@ -805,9 +896,13 @@ class DeepSeekTui(App[None]):
         self.add_message("error", text, "error-role")
 
     def write_tool_events(self, events: list[dict[str, Any]]) -> None:
-        self.add_message("system", self.tool_events_text(events), "system-role", "bubble tool-events")
+        self.tool_activity_events = events
+        self.update_tool_activity()
 
     def on_tool_event_progress(self, event: dict[str, Any]) -> None:
+        self.tool_activity_events.append(event)
+        self.tool_activity_events = self.tool_activity_events[-30:]
+        self.update_tool_activity()
         tool = str(event.get("tool") or "tool")
         if event.get("type") == "tool_call":
             if tool == "write_file":
@@ -951,8 +1046,8 @@ class DeepSeekTui(App[None]):
         if not text:
             self.write_system(f"No {label} to copy.")
             return
-        self.copy_text_to_clipboard(text)
-        self.write_system(f"Copied {label} ({len(text)} chars).")
+        method = self.copy_text_to_clipboard(text)
+        self.write_system(f"Copied {label} ({len(text)} chars) via {method}.")
 
     def last_message_text(self, role: str) -> str:
         for message in reversed(self.chat_messages):
@@ -969,8 +1064,41 @@ class DeepSeekTui(App[None]):
                 lines.append(f"{role}:\n{text}")
         return "\n\n".join(lines)
 
-    def copy_text_to_clipboard(self, text: str) -> None:
-        super().copy_to_clipboard(text)
+    def copy_text_to_clipboard(self, text: str) -> str:
+        external_method = self.copy_to_external_clipboard(text)
+        try:
+            super().copy_to_clipboard(text)
+        except Exception:
+            log.exception("textual clipboard copy failed")
+        if external_method:
+            return external_method
+        fallback_path = self.write_clipboard_fallback(text)
+        return f"terminal clipboard; fallback file {fallback_path}"
+
+    def copy_to_external_clipboard(self, text: str) -> str | None:
+        commands = [
+            ("wl-copy", ["wl-copy"]),
+            ("xclip", ["xclip", "-selection", "clipboard"]),
+            ("xsel", ["xsel", "--clipboard", "--input"]),
+            ("pbcopy", ["pbcopy"]),
+            ("termux-clipboard-set", ["termux-clipboard-set"]),
+        ]
+        for name, command in commands:
+            if shutil.which(command[0]) is None:
+                continue
+            try:
+                subprocess.run(command, input=text, text=True, check=True, timeout=5)
+                return name
+            except Exception:
+                log.exception("external clipboard copy failed command=%s", name)
+        return None
+
+    def write_clipboard_fallback(self, text: str) -> str:
+        output_dir = project_root() / ".logs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = output_dir / "clipboard-last.txt"
+        path.write_text(text, encoding="utf-8")
+        return str(path)
 
     def write_raw_transcript(self) -> str:
         output_dir = project_root() / ".logs"
@@ -1041,12 +1169,18 @@ class DeepSeekTui(App[None]):
     def update_stats(self) -> None:
         self.query_one("#stats-info", Static).update(self.stats_text())
 
+    def update_tool_activity(self) -> None:
+        self.query_one("#tool-activity", Static).update(self.tool_activity_text())
+
     def set_stats_visibility(self, width: int) -> None:
         stats = self.query_one("#stats-info", Static)
+        tool_activity = self.query_one("#tool-activity", Static)
         if width < 90:
             stats.add_class("hidden")
+            tool_activity.add_class("hidden")
         else:
             stats.remove_class("hidden")
+            tool_activity.remove_class("hidden")
 
     def stats_text(self) -> str:
         separator = "───────────────────────────"
@@ -1084,6 +1218,16 @@ class DeepSeekTui(App[None]):
             "Commands\n"
             f"{self.command_list_text()}"
         )
+
+    def tool_activity_text(self) -> str:
+        separator = "─" * 28
+        colored_separator = f"[bold cyan]{separator}[/]"
+        if not self.tool_activity_events:
+            return f"{colored_separator}\nTool Activity\n  idle"
+        lines = [f"{colored_separator}", "Tool Activity"]
+        activity = self.tool_events_text(self.tool_activity_events).splitlines()[1:]
+        lines.extend(f"  {line}" for line in activity[-12:])
+        return "\n".join(lines)
 
     def update_input_info(self, value: str | None = None) -> None:
         current_value = self.query_one("#prompt", Input).value if value is None else value
