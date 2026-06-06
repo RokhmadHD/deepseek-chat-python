@@ -154,7 +154,7 @@ Important env vars:
 | `DEEPSEEK_THINKING_ENABLED` | `false` | Enables thinking mode. |
 | `DEEPSEEK_SYSTEM_PROMPT_ENABLED` | `true` | Injects `deepseek_chat/settings/system.md` into new chat sessions. |
 | `DEEPSEEK_SYSTEM_PROMPT_PATH` | `deepseek_chat/settings/system.md` | Optional override for the system prompt file. |
-| `DEEPSEEK_MAX_TOOL_ROUNDS` | `4` | Maximum tool-call iterations before returning the latest model output. |
+| `DEEPSEEK_MAX_TOOL_ROUNDS` | `0` | Maximum tool-call iterations before returning the latest model output. `0` or unset means unlimited. |
 | `DEEPSEEK_TOOL_RESULT_MAX_BYTES` | `120000` | Maximum serialized tool result size sent back to DeepSeek. |
 | `DEEPSEEK_PREEMPT` | `false` | Request `preempt` value. |
 | `DEEPSEEK_POW_WASM_CACHE` | `.cache/sha3_wasm_bg.7b9ca65ddd.wasm` | PoW wasm cache location. |

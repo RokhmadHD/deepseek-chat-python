@@ -18,7 +18,7 @@ from .session_store import DEFAULT_PROFILE, StoredSession, load_session
 
 log = get_logger("client")
 DEFAULT_SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "settings" / "system.md"
-DEFAULT_MAX_TOOL_ROUNDS = 4
+DEFAULT_MAX_TOOL_ROUNDS = 0
 DEFAULT_TOOL_RESULT_MAX_BYTES = 120_000
 DEFAULT_RUN_COMMAND_PROMPT_MAX_BYTES = 8_000
 ToolEventCallback = Callable[[dict[str, Any]], None]
@@ -384,7 +384,10 @@ class DeepSeekClient:
         turn = self.chat(prompt, session_id=session_id, parent_message_id=parent_message_id, ref_file_ids=ref_file_ids)
         tool_events: list[dict[str, Any]] = []
 
-        for _round in range(max(0, self.max_tool_rounds)):
+        tool_round_limit = max(0, self.max_tool_rounds)
+        rounds = 0
+        while tool_round_limit == 0 or rounds < tool_round_limit:
+            rounds += 1
             message = parse_tool_message(turn.text)
             if message is None:
                 turn.tool_events = tool_events
