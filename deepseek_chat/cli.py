@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import sys
 from pathlib import Path
 
@@ -56,6 +57,32 @@ def load_environment() -> None:
     load_dotenv(project_root() / ".env")
 
 
+def prompt_tool_approval(tool_name: str, arguments: dict[str, object]) -> str:
+    if not sys.stdin.isatty():
+        return "deny"
+
+    if tool_name == "run_command":
+        command = arguments.get("command", "")
+        display_command = shlex.join(command) if isinstance(command, list) else str(command)
+        cwd = str(arguments.get("cwd") or ".")
+        print(f"\nTool approval needed: run_command")
+        print(f"  command: {display_command}")
+        print(f"  cwd: {cwd}")
+    elif tool_name == "write_file":
+        print(f"\nTool approval needed: write_file")
+        print(f"  path: {arguments.get('path', '')}")
+        print(f"  overwrite: {bool(arguments.get('overwrite', False))}")
+        print(f"  create_dirs: {bool(arguments.get('create_dirs', False))}")
+    else:
+        print(f"\nTool approval needed: {tool_name}")
+
+    try:
+        answer = input("Approve? [y/N]: ").strip().lower()
+    except EOFError:
+        return "deny"
+    return "approve_once" if answer in {"y", "yes"} else "deny"
+
+
 def main() -> None:
     log_file = setup_logging()
     log = get_logger("cli")
@@ -83,7 +110,7 @@ def main() -> None:
 
     try:
         if args.prompt:
-            turn = client.chat_with_tools(" ".join(args.prompt))
+            turn = client.chat_with_tools(" ".join(args.prompt), on_tool_approval=prompt_tool_approval)
             print(turn.text)
             return
 
@@ -96,7 +123,12 @@ def main() -> None:
                 return
             if not prompt:
                 continue
-            turn = client.chat_with_tools(prompt, session_id=session_id, parent_message_id=parent_message_id)
+            turn = client.chat_with_tools(
+                prompt,
+                session_id=session_id,
+                parent_message_id=parent_message_id,
+                on_tool_approval=prompt_tool_approval,
+            )
             session_id = turn.session_id
             parent_message_id = turn.parent_message_id
             print(turn.text)

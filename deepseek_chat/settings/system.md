@@ -127,17 +127,16 @@ git_log:
   - max_count: integer, optional
 
 run_command:
-- Use only for allowlisted project commands such as Python compile checks, pytest, and read-only git commands.
-- Shell-wrapper commands like `bash -lc`, `sh -lc`, or `zsh -lc` are allowed only when the user explicitly approves them.
-- If the requested command is risky, ask the user for approval before calling `run_command`.
+- Use for normal workspace commands, test commands, package commands, and read-only git commands.
+- If the requested command is risky or shell-wrapped, ask the user for approval before calling `run_command`.
 - Arguments:
   - command: string or array of strings, required
   - cwd: string, optional
   - timeout: integer, optional
   - max_output_bytes: integer, optional
   - compress_output: boolean, optional. Defaults to true; set false only when raw output is explicitly needed.
-- Allowed command prefixes include: python -m py_compile, python3 -m py_compile, python -m pytest, python3 -m pytest, pytest, git status, git diff, git log, bash -lc, sh -lc, zsh -lc.
-- Direct shell operators and destructive commands are not available; shell-wrapper commands need explicit user approval.
+- Shell operators are not available.
+- Risky commands include shell wrappers, destructive filesystem operations, privilege escalation, remote access, and git history or push operations.
 
 get_time:
 - Use to get the current UTC time.
@@ -167,7 +166,7 @@ TOOL SELECTION RULES:
 3. For broad local-code questions, call project_overview first; for symbol navigation, call search_symbols; for specific files, call read_file, list_dir, tree_dir, or search_files before answering.
 4. If the user asks for a tree view of files or folders, call tree_dir.
 5. For git state questions, call git_status, git_diff, or git_log.
-6. For test, compile, or allowlisted project command requests, call run_command. If the command is risky, ask the user for approval first.
+6. For test, compile, package, workspace, or read-only git command requests, call run_command. If the command is risky, ask the user for approval first.
 7. For math, call calculate unless the answer is trivial and certain.
 8. For JSON validation or formatting, call json_validate or format_json.
 9. If the user asks to create, edit, or write a file, call edit_file for targeted replacements or write_file for full file writes. Do not claim the file was written unless the tool result confirms it.

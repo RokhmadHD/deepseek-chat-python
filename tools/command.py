@@ -23,24 +23,13 @@ IMPORTANT_LINE_MARKERS = (
     "syntaxerror",
 )
 
-ALLOWED_EXACT_PREFIXES = (
-    ("python", "-m", "py_compile"),
-    ("python3", "-m", "py_compile"),
-    ("python", "-m", "pytest"),
-    ("python3", "-m", "pytest"),
-    ("pytest",),
-    ("git", "status"),
-    ("git", "diff"),
-    ("git", "log"),
-)
-
 SHELL_COMMAND_PREFIXES = (
     ("bash", "-lc"),
     ("sh", "-lc"),
     ("zsh", "-lc"),
 )
 
-BLOCKED_TOKENS = {
+RISKY_TOKENS = {
     "rm",
     "rmdir",
     "mv",
@@ -55,6 +44,29 @@ BLOCKED_TOKENS = {
     "scp",
     "fish",
 }
+
+RISKY_PREFIXES = (
+    ("git", "push"),
+    ("git", "reset"),
+    ("git", "clean"),
+    ("git", "rebase"),
+    ("git", "checkout", "-f"),
+    ("git", "merge", "--abort"),
+    ("git", "revert", "--no-commit"),
+    ("rm",),
+    ("rmdir",),
+    ("mv",),
+    ("cp",),
+    ("sudo",),
+    ("su",),
+    ("chmod",),
+    ("chown",),
+    ("curl",),
+    ("wget",),
+    ("ssh",),
+    ("scp",),
+    ("fish",),
+)
 
 
 def run_command(
@@ -96,7 +108,12 @@ def run_command(
 
 def command_requires_approval(command: str | list[str]) -> bool:
     args = parse_command(command)
-    return any(tuple(args[: len(prefix)]) == prefix for prefix in SHELL_COMMAND_PREFIXES)
+    if any(tuple(args[: len(prefix)]) == prefix for prefix in SHELL_COMMAND_PREFIXES):
+        return True
+    executable = args[0]
+    if executable in RISKY_TOKENS:
+        return True
+    return any(tuple(args[: len(prefix)]) == prefix for prefix in RISKY_PREFIXES)
 
 
 def parse_command(command: str | list[str]) -> list[str]:
@@ -107,15 +124,8 @@ def parse_command(command: str | list[str]) -> list[str]:
 
 
 def validate_command(args: list[str]) -> None:
-    executable = args[0]
-    if executable in BLOCKED_TOKENS:
-        raise ValueError(f"command is blocked: {executable}")
     if any(token in {"&&", "||", ";", "|", ">", ">>", "<"} for token in args):
         raise ValueError("shell operators are not allowed")
-    allowed_prefixes = ALLOWED_EXACT_PREFIXES + SHELL_COMMAND_PREFIXES
-    if not any(tuple(args[: len(prefix)]) == prefix for prefix in allowed_prefixes):
-        allowed = ", ".join(" ".join(prefix) for prefix in allowed_prefixes)
-        raise ValueError(f"command is not allowed. Allowed prefixes: {allowed}")
 
 
 def prepare_output(text: str, max_bytes: int, compress_output: bool) -> tuple[str, bool, bool]:

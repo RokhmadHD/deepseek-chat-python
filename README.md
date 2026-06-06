@@ -171,7 +171,7 @@ The `tools` package contains callable tool implementations and JSON schemas for 
 - `multi_search`: searches multiple queries through SearXNG and deduplicates URLs for deep search.
 - `list_dir`, `tree_dir`, `read_file`, `search_files`, `write_file`: workspace-scoped filesystem tools. `write_file` asks for TUI approval before it executes.
 - `git_status`, `git_diff`, `git_log`: read-only project state tools.
-- `run_command`: allowlisted project commands such as compile checks, pytest, and read-only git commands. Shell-wrapper commands need explicit approval.
+- `run_command`: normal workspace commands, compile checks, pytest, package commands, and read-only git commands. Risky commands and shell wrappers need explicit approval.
 - `get_time`, `calculate`, `json_validate`, `format_json`: utility tools.
 
 ## Troubleshooting

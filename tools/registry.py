@@ -191,7 +191,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "run_command",
-        "description": "Run an allowlisted command in the workspace. Shell-wrapper commands require user approval.",
+        "description": "Run workspace commands in the workspace. Risky commands and shell-wrapper commands require user approval.",
         "parameters": {
             "type": "object",
             "properties": {
