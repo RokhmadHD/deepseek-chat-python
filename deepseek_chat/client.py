@@ -20,6 +20,7 @@ log = get_logger("client")
 DEFAULT_SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "settings" / "system.md"
 DEFAULT_MAX_TOOL_ROUNDS = 4
 DEFAULT_TOOL_RESULT_MAX_BYTES = 120_000
+DEFAULT_RUN_COMMAND_PROMPT_MAX_BYTES = 8_000
 ToolEventCallback = Callable[[dict[str, Any]], None]
 ToolApprovalDecision = str
 ToolApprovalCallback = Callable[[str, dict[str, Any]], ToolApprovalDecision]
@@ -191,6 +192,14 @@ def summarize_tool_result(result: dict[str, Any]) -> str:
     if "content" in result:
         return f"{len(string_value(result.get('content')))} chars"
     return "ok"
+
+
+def tool_result_excerpt(text: str, max_bytes: int) -> str:
+    if not text:
+        return ""
+    if len(text.encode("utf-8")) <= max_bytes:
+        return text
+    return truncate_text(text, max_bytes)
 
 
 def truncate_text(text: str, max_bytes: int) -> str:
@@ -375,6 +384,7 @@ class DeepSeekClient:
                 if approval_denied:
                     raise PermissionError(f"{tool_name} denied by user")
                 result = execute_registered_tool(tool_name, arguments)
+                tool_payload = self.tool_followup_payload(tool_name, result, ok=True)
                 result_event = {
                     "type": "tool_result",
                     "tool": tool_name,
@@ -385,7 +395,6 @@ class DeepSeekClient:
                 tool_events.append(result_event)
                 if on_tool_event:
                     on_tool_event(result_event)
-                tool_payload = {"ok": True, "result": result}
             except PermissionError as exc:
                 result_event = {
                     "type": "tool_result",
@@ -423,6 +432,26 @@ class DeepSeekClient:
         turn.tool_events = tool_events
         return turn
 
+    def tool_followup_payload(self, tool_name: str, result: dict[str, Any], *, ok: bool) -> dict[str, Any]:
+        if tool_name != "run_command":
+            return {"ok": ok, "result": result}
+
+        payload: dict[str, Any] = {
+            "ok": ok,
+            "summary": summarize_tool_result(result),
+            "returncode": result.get("returncode"),
+            "command": result.get("command"),
+            "cwd": result.get("cwd"),
+            "stdout_truncated": bool(result.get("stdout_truncated")),
+            "stderr_truncated": bool(result.get("stderr_truncated")),
+            "stdout_compressed": bool(result.get("stdout_compressed")),
+            "stderr_compressed": bool(result.get("stderr_compressed")),
+        }
+        if env_bool("DEEPSEEK_TOOL_RESULT_INCLUDE_OUTPUT", False):
+            payload["stdout"] = tool_result_excerpt(string_value(result.get("stdout")), DEFAULT_RUN_COMMAND_PROMPT_MAX_BYTES)
+            payload["stderr"] = tool_result_excerpt(string_value(result.get("stderr")), DEFAULT_RUN_COMMAND_PROMPT_MAX_BYTES)
+        return payload
+
     def tool_result_prompt(self, tool_name: str, arguments: dict[str, Any], payload: dict[str, Any]) -> str:
         encoded = json.dumps(
             {
@@ -434,11 +463,17 @@ class DeepSeekClient:
             default=str,
         )
         encoded = truncate_text(encoded, self.tool_result_max_bytes)
+        extra_guidance = ""
+        if tool_name == "run_command":
+            extra_guidance = (
+                "Do not quote stdout or stderr verbatim unless the user explicitly asked for command output. "
+                "Use the summary, return code, command, and cwd to decide the next step. "
+            )
         return (
             "<TOOL_RESULT>\n"
             f"{encoded}\n"
             "</TOOL_RESULT>\n\n"
-            "Return the next valid JSON object now. If this result answers the user, return a response object. "
+            f"{extra_guidance}Return the next valid JSON object now. If this result answers the user, return a response object. "
             "If another tool is required, return one tool_call object."
         )
 

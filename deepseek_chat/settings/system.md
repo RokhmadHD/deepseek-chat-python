@@ -129,6 +129,7 @@ git_log:
 run_command:
 - Use for normal workspace commands, test commands, package commands, and read-only git commands.
 - If the requested command is risky or shell-wrapped, ask the user for approval before calling `run_command`.
+- Do not quote stdout or stderr verbatim unless the user explicitly asked for command output.
 - Arguments:
   - command: string or array of strings, required
   - cwd: string, optional
