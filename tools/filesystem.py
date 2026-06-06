@@ -252,7 +252,7 @@ def resolve_workspace_path(path: str) -> Path:
 
 
 def workspace_root() -> Path:
-    return Path(os.getenv(WORKSPACE_ROOT_ENV, Path(__file__).resolve().parents[1])).resolve()
+    return Path(os.getenv(WORKSPACE_ROOT_ENV, Path.cwd())).resolve()
 
 
 def relative_path(path: Path) -> str:
