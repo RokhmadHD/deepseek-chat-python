@@ -1,27 +1,49 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from .logging_config import get_logger, project_root, setup_logging
 from .session_store import load_session
 
 
-def print_status(profile: str) -> None:
+def print_status(profile: str, as_json: bool = False) -> None:
     session = load_session(profile)
-    print(f"profile: {profile}")
     if not session:
+        payload = {
+            "profile": profile,
+            "status": "not logged in",
+            "session": "no stored auth session found",
+        }
+        if as_json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return
+        print(f"profile: {profile}")
         print("status: not logged in")
         print("session: no stored auth session found")
         return
 
     logged_in = bool(session.bearer and session.cookie_header)
-    print(f"status: {'logged in' if logged_in else 'session incomplete'}")
-    print(f"captured_at: {session.captured_at}")
-    print(f"bearer: {'present' if session.bearer else 'missing'}")
-    print(f"cookie_header: {'present' if session.cookie_header else 'missing'}")
-    print(f"ds_session_id: {'present' if session.ds_session_id else 'missing'}")
-    print(f"x_hif_leim: {'present' if session.x_hif_leim else 'missing'}")
+    payload = {
+        "profile": profile,
+        "status": "logged in" if logged_in else "session incomplete",
+        "captured_at": session.captured_at,
+        "bearer": "present" if session.bearer else "missing",
+        "cookie_header": "present" if session.cookie_header else "missing",
+        "ds_session_id": "present" if session.ds_session_id else "missing",
+        "x_hif_leim": "present" if session.x_hif_leim else "missing",
+    }
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+    print(f"profile: {profile}")
+    print(f"status: {payload['status']}")
+    print(f"captured_at: {payload['captured_at']}")
+    print(f"bearer: {payload['bearer']}")
+    print(f"cookie_header: {payload['cookie_header']}")
+    print(f"ds_session_id: {payload['ds_session_id']}")
+    print(f"x_hif_leim: {payload['x_hif_leim']}")
 
 
 def load_environment() -> None:
@@ -39,14 +61,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Minimal DeepSeek web chat CLI")
     parser.add_argument("--profile", default="default", help="SQLite auth profile. Defaults to default.")
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("status", help="Show whether the active profile is logged in.")
+    status_parser = subparsers.add_parser("status", help="Show whether the active profile is logged in.")
+    status_parser.add_argument("--json", action="store_true", help="Print status as JSON.")
     parser.add_argument("prompt", nargs="*", help="Prompt text. Omit for interactive mode.")
     args = parser.parse_args()
 
     if args.command == "status":
         if args.prompt:
             parser.error("status does not take a prompt")
-        print_status(args.profile)
+        print_status(args.profile, as_json=args.json)
         return
 
     load_environment()

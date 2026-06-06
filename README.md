@@ -100,6 +100,7 @@ Check whether the current profile is logged in:
 
 ```bash
 deepseek-chat status
+deepseek status --json
 ```
 
 Interactive mode:

@@ -24,6 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = subparsers.add_parser("status", help="Show whether the active profile is logged in.")
     status_parser.add_argument("--profile", default="default", help="SQLite auth profile. Defaults to default.")
+    status_parser.add_argument("--json", action="store_true", help="Print status as JSON.")
 
     return parser
 
@@ -74,7 +75,7 @@ def _run_login(args: argparse.Namespace) -> None:
 def _run_status(args: argparse.Namespace) -> None:
     from .cli import print_status
 
-    print_status(args.profile)
+    print_status(args.profile, as_json=args.json)
 
 
 if __name__ == "__main__":
