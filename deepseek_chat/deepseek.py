@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 from typing import Callable
 
 
@@ -26,6 +30,13 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--profile", default="default", help="SQLite auth profile. Defaults to default.")
     status_parser.add_argument("--json", action="store_true", help="Print status as JSON.")
 
+    reinstall_parser = subparsers.add_parser("reinstall", help="Reinstall the current project into the active environment.")
+    reinstall_parser.add_argument(
+        "--path",
+        default=".",
+        help="Project path to reinstall from. Defaults to the current working directory.",
+    )
+
     return parser
 
 
@@ -36,6 +47,7 @@ def main(argv: list[str] | None = None) -> None:
     handlers: dict[str, Callable[[argparse.Namespace], None]] = {
         "tui": _run_tui,
         "login": _run_login,
+        "reinstall": _run_reinstall,
         "status": _run_status,
     }
     handler = handlers[args.command]
@@ -76,6 +88,25 @@ def _run_status(args: argparse.Namespace) -> None:
     from .cli import print_status
 
     print_status(args.profile, as_json=args.json)
+
+
+def _run_reinstall(args: argparse.Namespace) -> None:
+    project_path = Path(args.path).expanduser().resolve()
+    if not project_path.exists():
+        raise SystemExit(f"project path does not exist: {project_path}")
+    if not (project_path / "pyproject.toml").exists():
+        raise SystemExit(f"pyproject.toml not found: {project_path}")
+
+    pipx = shutil.which("pipx")
+    if pipx:
+        command = [pipx, "install", "--force", str(project_path)]
+        mode = "pipx"
+    else:
+        command = [sys.executable, "-m", "pip", "install", "--user", "--upgrade", str(project_path)]
+        mode = "pip --user"
+
+    print(f"reinstalling from {project_path} using {mode}")
+    subprocess.run(command, check=True)
 
 
 if __name__ == "__main__":

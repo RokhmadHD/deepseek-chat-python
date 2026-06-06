@@ -88,6 +88,7 @@ Global command:
 deepseek login
 deepseek status
 deepseek tui
+deepseek reinstall
 ```
 
 One-shot command:
