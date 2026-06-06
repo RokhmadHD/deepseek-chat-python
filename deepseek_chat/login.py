@@ -33,7 +33,7 @@ APP_READY_SELECTORS = [
 ]
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Login to DeepSeek web and save auth session to SQLite.")
     parser.add_argument("--url", default=DEFAULT_URL, help="DeepSeek start URL.")
     parser.add_argument("--output-dir", default=None, help="Capture output dir. Defaults to captures/deepseek-login-<timestamp>.")
@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wait-timeout", type=int, default=180, help="Seconds to wait for login auto-detection.")
     parser.add_argument("--profile", default=DEFAULT_PROFILE, help="SQLite auth profile to replace. Defaults to default.")
     parser.add_argument("--no-db", action="store_true", help="Save capture only; do not update SQLite.")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def any_visible(page: Any, selectors: list[str]) -> bool:
@@ -134,9 +134,9 @@ def launch_browser(playwright: Any, browser_path: str | None, headless: bool) ->
     return playwright.chromium.launch(headless=headless)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     log_file = setup_logging()
-    args = parse_args()
+    args = parse_args(argv)
     root = project_root()
     output_dir = (
         Path(args.output_dir).expanduser().resolve()

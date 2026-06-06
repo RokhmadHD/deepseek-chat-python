@@ -82,6 +82,14 @@ python3 -m playwright install chromium
 
 ## Usage
 
+Global command:
+
+```bash
+deepseek login
+deepseek status
+deepseek tui
+```
+
 One-shot command:
 
 ```bash
@@ -105,8 +113,8 @@ In interactive mode, the session and `parent_message_id` are preserved while the
 Terminal TUI:
 
 ```bash
-deepseek-chat-tui
-deepseek-chat-tui resume
+deepseek tui
+deepseek tui resume
 ```
 
 The TUI uses Textual. Controls:
@@ -124,7 +132,7 @@ The TUI uses Textual. Controls:
 - `/quit`, `/exit`, or `/q` to exit.
 - `Ctrl+L` to clear the chat.
 
-`deepseek-chat-tui resume` shows saved chat sessions for the active profile, lets you move with arrow keys, and opens the selected session.
+`deepseek tui resume` shows saved chat sessions for the active profile, lets you move with arrow keys, and opens the selected session.
 
 TUI responses are displayed progressively like streaming. For now, the HTTP request is still non-streaming, so text starts appearing after the full response is received from DeepSeek.
 

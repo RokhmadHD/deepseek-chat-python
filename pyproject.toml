@@ -13,6 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
+deepseek = "deepseek_chat.deepseek:main"
 deepseek-chat = "deepseek_chat.cli:main"
 deepseek-chat-login = "deepseek_chat.login:main"
 deepseek-chat-tui = "deepseek_chat.tui:main"

@@ -1493,13 +1493,13 @@ class DeepSeekTui(App[None]):
         self.update_status("Ready")
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     log_file = setup_logging()
     load_dotenv(project_root() / ".env")
     parser = argparse.ArgumentParser(description="DeepSeek web chat Textual TUI")
     parser.add_argument("--profile", default="default", help="SQLite auth profile. Defaults to default.")
     parser.add_argument("mode", nargs="?", choices=["resume"], help="Resume a saved chat session.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
         if args.mode == "resume":
             sessions = list_chat_sessions(args.profile)

@@ -22,20 +22,21 @@ install_with_user_pip() {
 }
 
 if install_with_pipx; then
-  echo "Installed deepseek-chat using pipx."
+  echo "Installed deepseek commands using pipx."
 else
   echo "pipx not found, falling back to python3 -m pip install --user ..."
   install_with_user_pip
-  echo "Installed deepseek-chat with --user site-packages."
+  echo "Installed deepseek commands with --user site-packages."
 fi
 
 echo
 echo "Available commands:"
+echo "  deepseek"
 echo "  deepseek-chat"
 echo "  deepseek-chat-login"
 echo "  deepseek-chat-tui"
 echo
-if ! command -v deepseek-chat-tui >/dev/null 2>&1; then
+if ! command -v deepseek >/dev/null 2>&1; then
   echo "If the commands are not found, add this directory to PATH:" >&2
   echo "  ~/.local/bin" >&2
 fi
